@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OFF - Chat & Call</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="background-3d"></div>
+    <div class="app-container">
+        <div id="login-screen" class="card">
+            <h2>Welcome to OFF</h2>
+            <p>Enter a username to begin</p>
+            <input type="text" id="username-input" placeholder="Your Username">
+            <button id="join-btn">Join Chat</button>
+        </div>
+
+        <div id="main-app" class="hidden">
+            <div id="chat-container">
+                <div id="messages"></div>
+                <div class="input-area">
+                    <input type="text" id="message-input" placeholder="Type a message...">
+                    <button id="send-btn">Send</button>
+                </div>
+            </div>
+            <div id="video-container">
+                <video id="local-video" autoplay muted></video>
+                <video id="remote-video" autoplay></video>
+                <div class="call-controls">
+                    <button id="call-btn">📞 Call</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
