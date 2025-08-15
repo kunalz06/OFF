@@ -45,6 +45,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const statusViewer = document.getElementById('status-viewer');
     const viewerImage = document.getElementById('viewer-image');
     const closeViewerBtn = document.getElementById('close-viewer-btn');
+    const preCallAudioBtn = document.getElementById('pre-call-audio-btn');
+    const preCallVideoBtn = document.getElementById('pre-call-video-btn');
 
     const stunServers = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
@@ -57,6 +59,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     currentUser = response.userData;
                     loginScreen.classList.add('hidden');
                     mainApp.classList.remove('hidden');
+                    requestNotificationPermission();
                     initializeMedia();
                     updateUI();
                 } else {
@@ -68,12 +71,30 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function initializeMedia() {
         try {
+            // Get a default stream to show in the local video element, can be modified later
             localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
             localVideo.srcObject = localStream;
-        } catch (error) { console.error("Error accessing media devices.", error); }
+        } catch (error) { 
+            console.error("Error accessing media devices.", error);
+            // If user denies, create a stream without media tracks
+            localStream = new MediaStream();
+        }
     }
 
-    // --- 2. UI Management ---
+    // --- 2. Notification Logic ---
+    function requestNotificationPermission() {
+        if ('Notification' in window && Notification.permission !== 'granted' && Notification.permission !== 'denied') {
+            Notification.requestPermission();
+        }
+    }
+
+    function showNotification(title, body) {
+        if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {
+            new Notification(title, { body, icon: '/favicon.ico' }); // Optional: add an icon
+        }
+    }
+
+    // --- 3. UI Management ---
     function updateUI() {
         profileUsername.textContent = `Welcome, ${currentUser.username}`;
         friendRequestsList.innerHTML = '';
@@ -117,7 +138,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    // --- 3. Status Feature Logic ---
+    // --- 4. Status Feature Logic ---
     statusImageInput.addEventListener('change', (e) => {
         const file = e.target.files[0];
         if (!file) return;
@@ -145,17 +166,11 @@ document.addEventListener('DOMContentLoaded', () => {
         card.className = 'status-card';
         card.dataset.statusId = status._id;
         card.dataset.imageUrl = status.imageUrl;
-
         let deleteButtonHTML = '';
         if (currentUser.username === status.username) {
             deleteButtonHTML = `<button class="delete-status-btn" data-status-id="${status._id}">&times;</button>`;
         }
-
-        card.innerHTML = `
-            <img src="${status.imageUrl}" alt="Status by ${status.username}">
-            <p><strong>${status.username}</strong></p>
-            ${deleteButtonHTML}
-        `;
+        card.innerHTML = `<img src="${status.imageUrl}" alt="Status by ${status.username}"><p><strong>${status.username}</strong></p>${deleteButtonHTML}`;
         statusesFeed.prepend(card);
     }
 
@@ -166,9 +181,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const statusId = target.dataset.statusId;
             if (confirm('Are you sure you want to delete this status?')) {
                 socket.emit('delete-status', statusId, (response) => {
-                    if (!response.success) {
-                        alert(`Error: ${response.message}`);
-                    }
+                    if (!response.success) alert(`Error: ${response.message}`);
                 });
             }
         } else {
@@ -185,7 +198,7 @@ document.addEventListener('DOMContentLoaded', () => {
         viewerImage.src = '';
     });
 
-    // --- 4. Friend & Chat Logic ---
+    // --- 5. Friend & Chat Logic ---
     sendRequestBtn.addEventListener('click', () => {
         const recipientUsername = addUsernameInput.value.trim();
         if (recipientUsername) {
@@ -200,10 +213,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.target.tagName === 'BUTTON') {
             const senderUsername = e.target.dataset.username;
             socket.emit('accept-friend-request', senderUsername, (response) => {
-                if (response.success) {
-                    currentUser = response.userData;
-                    updateUI();
-                }
+                if (response.success) currentUser = response.userData;
+                updateUI();
             });
         }
     });
@@ -214,6 +225,17 @@ document.addEventListener('DOMContentLoaded', () => {
         welcomeScreen.classList.add('hidden');
         chatHeader.textContent = username;
         messagesContainer.innerHTML = '';
+        socket.emit('get-chat-history', { friendUsername: username }, (history) => {
+            history.forEach(msg => renderMessage(msg));
+        });
+    }
+
+    function renderMessage(msg) {
+        const bubble = document.createElement('div');
+        bubble.className = `message-bubble ${msg.sender === currentUser.username ? 'sent' : 'received'}`;
+        bubble.innerText = msg.text;
+        messagesContainer.appendChild(bubble);
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
     }
 
     function sendMessage() {
@@ -226,27 +248,24 @@ document.addEventListener('DOMContentLoaded', () => {
     sendBtn.addEventListener('click', sendMessage);
     messageInput.addEventListener('keypress', (e) => (e.key === 'Enter') && sendMessage());
 
-    // --- 5. Real-time Socket Event Handlers ---
+    // --- 6. Real-time Socket Event Handlers ---
     socket.on('private-message', (msg) => {
         if (msg.sender === activeChat || msg.sender === currentUser.username) {
-            const bubble = document.createElement('div');
-            bubble.className = `message-bubble ${msg.sender === currentUser.username ? 'sent' : 'received'}`;
-            bubble.innerText = msg.text;
-            messagesContainer.appendChild(bubble);
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            renderMessage(msg);
+        }
+        if (msg.sender !== currentUser.username && msg.sender !== activeChat) {
+            showNotification(`New Message from ${msg.sender}`, msg.text);
         }
     });
     socket.on('new-friend-request', (senderUsername) => {
-        if (!currentUser.friendRequests.includes(senderUsername)) {
-            currentUser.friendRequests.push(senderUsername);
-        }
+        if (!currentUser.friendRequests.includes(senderUsername)) currentUser.friendRequests.push(senderUsername);
         updateUI();
-        alert(`New friend request from ${senderUsername}!`);
+        showNotification('New Friend Request', `From ${senderUsername}`);
     });
     socket.on('request-accepted', (updatedUserData) => {
         currentUser = updatedUserData;
         updateUI();
-        alert(`Your friend request was accepted!`);
+        showNotification('Friend Request Accepted', `${updatedUserData.friends.find(f => f !== currentUser.username)} is now your friend.`);
     });
     socket.on('friend-online', (username) => {
         const indicator = document.querySelector(`.contact-item[data-username="${username}"] .status-indicator`);
@@ -261,17 +280,13 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     socket.on('status-deleted', (statusId) => {
         const cardToRemove = document.querySelector(`.status-card[data-status-id="${statusId}"]`);
-        if (cardToRemove) {
-            cardToRemove.remove();
-        }
+        if (cardToRemove) cardToRemove.remove();
     });
 
-    // --- 6. WebRTC Calling Logic ---
+    // --- 7. WebRTC Calling Logic ---
     function createPeerConnection(recipient) {
         peerConnection = new RTCPeerConnection(stunServers);
-        peerConnection.ontrack = (event) => {
-            remoteVideo.srcObject = event.streams[0];
-        };
+        peerConnection.ontrack = (event) => { remoteVideo.srcObject = event.streams[0]; };
         peerConnection.onicecandidate = (event) => {
             if (event.candidate) socket.emit('ice-candidate', { recipient, candidate: event.candidate });
         };
@@ -293,18 +308,46 @@ document.addEventListener('DOMContentLoaded', () => {
         incomingCallData = data;
         callerUsernameEl.textContent = data.sender;
         incomingCallToast.classList.remove('hidden');
+        showNotification(`Incoming call from ${data.sender}`, 'Click to answer.');
+    });
+
+    preCallAudioBtn.addEventListener('click', () => {
+        preCallAudioBtn.classList.toggle('active');
+        preCallAudioBtn.textContent = preCallAudioBtn.classList.contains('active') ? '🎤 Audio ON' : '🔇 Audio OFF';
+    });
+    preCallVideoBtn.addEventListener('click', () => {
+        preCallVideoBtn.classList.toggle('active');
+        preCallVideoBtn.textContent = preCallVideoBtn.classList.contains('active') ? '📹 Video ON' : '📸 Video OFF';
     });
 
     acceptCallBtn.addEventListener('click', async () => {
-        incomingCallToast.classList.add('hidden');
-        callModal.classList.remove('hidden');
-        callStatus.textContent = `In call with ${incomingCallData.sender}`;
-        createPeerConnection(incomingCallData.sender);
-        await peerConnection.setRemoteDescription(new RTCSessionDescription(incomingCallData.offer));
-        const answer = await peerConnection.createAnswer();
-        await peerConnection.setLocalDescription(answer);
-        socket.emit('make-answer', { sender: incomingCallData.sender, answer });
-        incomingCallData = null;
+        const isAudioEnabled = preCallAudioBtn.classList.contains('active');
+        const isVideoEnabled = preCallVideoBtn.classList.contains('active');
+        if (!isAudioEnabled && !isVideoEnabled) {
+            alert("You must enable audio or video to accept the call.");
+            return;
+        }
+        try {
+            localStream.getTracks().forEach(track => track.stop()); // Stop previous stream
+            localStream = await navigator.mediaDevices.getUserMedia({ audio: isAudioEnabled, video: isVideoEnabled });
+            localVideo.srcObject = localStream;
+            toggleAudioBtn.classList.toggle('muted', !isAudioEnabled);
+            toggleAudioBtn.textContent = isAudioEnabled ? '🎤' : '🔇';
+            toggleVideoBtn.classList.toggle('off', !isVideoEnabled);
+            toggleVideoBtn.textContent = isVideoEnabled ? '📹' : '📸';
+            incomingCallToast.classList.add('hidden');
+            callModal.classList.remove('hidden');
+            callStatus.textContent = `In call with ${incomingCallData.sender}`;
+            createPeerConnection(incomingCallData.sender);
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(incomingCallData.offer));
+            const answer = await peerConnection.createAnswer();
+            await peerConnection.setLocalDescription(answer);
+            socket.emit('make-answer', { sender: incomingCallData.sender, answer });
+            incomingCallData = null;
+        } catch (error) {
+            console.error("Error getting media for call:", error);
+            alert("Could not start call. Check camera/microphone permissions.");
+        }
     });
 
     rejectCallBtn.addEventListener('click', () => {

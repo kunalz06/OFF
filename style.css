@@ -133,14 +133,14 @@ button:hover { background-color: var(--secondary-color); }
     grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
     gap: 15px;
     overflow-y: auto;
-    max-height: calc(90vh - 150px); /* Adjust based on your layout */
+    max-height: calc(90vh - 150px);
 }
 .status-card {
     border-radius: 8px;
     overflow: hidden;
     background: #1a1a1a;
     padding: 8px;
-    position: relative; /* Needed for positioning the delete button */
+    position: relative;
     cursor: pointer;
 }
 .status-card img {
@@ -173,10 +173,10 @@ button:hover { background-color: var(--secondary-color); }
     margin: 0;
     padding: 0;
     transition: background 0.2s, opacity 0.2s;
-    opacity: 0; /* Hidden by default */
+    opacity: 0;
 }
 .status-card:hover .delete-status-btn {
-    opacity: 1; /* Show on hover */
+    opacity: 1;
 }
 .delete-status-btn:hover {
     background: var(--error-color);
@@ -202,7 +202,7 @@ button:hover { background-color: var(--secondary-color); }
     display: flex;
     justify-content: center;
     align-items: center;
-    z-index: 110; /* Higher than call modal */
+    z-index: 110;
 }
 #viewer-image {
     max-width: 90%;
@@ -233,7 +233,44 @@ button:hover { background-color: var(--secondary-color); }
 #toggle-audio-btn, #toggle-video-btn { background-color: #444; }
 #toggle-audio-btn.muted, #toggle-video-btn.off { background-color: var(--primary-color); }
 
-#incoming-call-toast { position: fixed; top: 20px; right: 20px; background: var(--light-bg); padding: 20px; border-radius: 10px; box-shadow: 0 5px 15px rgba(0,0,0,0.5); z-index: 101; }
-#incoming-call-toast button { margin: 0 5px; }
+#incoming-call-toast {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background: var(--light-bg);
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+    z-index: 101;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+#incoming-call-toast p {
+    margin: 0;
+    text-align: center;
+}
+.call-actions {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+}
+#incoming-call-toast button {
+    margin: 0;
+    flex-grow: 1;
+}
+.pre-call-controls {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+}
+.pre-call-controls button {
+    font-size: 0.8rem;
+    padding: 8px 12px;
+    background-color: var(--error-color);
+}
+.pre-call-controls button.active {
+    background-color: var(--success-color);
+}
 #accept-call-btn { background-color: var(--success-color); }
 #reject-call-btn { background-color: var(--error-color); }

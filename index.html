@@ -9,6 +9,7 @@
 <body>
     <div class="background-lines"></div>
 
+    <!-- Login Screen -->
     <div id="login-screen" class="app-container">
         <div class="card">
             <h2>OFF</h2>
@@ -18,6 +19,7 @@
         </div>
     </div>
 
+    <!-- Main App -->
     <div id="main-app" class="app-container hidden">
         <aside id="sidebar">
             <div class="sidebar-header">
@@ -28,10 +30,12 @@
                     <button class="tab-link" data-tab="profile">Profile</button>
                 </nav>
             </div>
+            <!-- Contact list for chats and calls -->
             <div id="contact-list"></div>
         </aside>
 
         <main id="main-content">
+            <!-- CHATS TAB CONTENT -->
             <div id="chats-tab" class="tab-content active">
                 <div id="welcome-screen">
                     <h2>Select a chat to begin</h2>
@@ -47,6 +51,7 @@
                 </div>
             </div>
 
+            <!-- STATUS TAB CONTENT -->
             <div id="status-tab" class="tab-content hidden">
                 <h3>Recent Statuses</h3>
                 <div class="status-upload-area">
@@ -56,6 +61,7 @@
                 <div id="statuses-feed"></div>
             </div>
 
+            <!-- CALLS TAB CONTENT -->
             <div id="calls-tab" class="tab-content hidden">
                  <div id="calls-welcome-screen">
                     <h2>Your Friends</h2>
@@ -63,6 +69,7 @@
                 </div>
             </div>
 
+            <!-- PROFILE TAB CONTENT -->
             <div id="profile-tab" class="tab-content hidden">
                 <div class="profile-header">
                     <h2 id="profile-username"></h2>
@@ -84,6 +91,7 @@
         </main>
     </div>
 
+    <!-- Call Modal -->
     <div id="call-modal" class="hidden">
         <div class="call-info">
             <h3 id="call-status"></h3>
@@ -100,12 +108,20 @@
         </div>
     </div>
     
+    <!-- Incoming Call Notification -->
     <div id="incoming-call-toast" class="hidden">
         <p><strong id="caller-username"></strong> is calling...</p>
-        <button id="accept-call-btn">Accept</button>
-        <button id="reject-call-btn">Reject</button>
+        <div class="pre-call-controls">
+            <button id="pre-call-audio-btn" class="active">🎤 Audio ON</button>
+            <button id="pre-call-video-btn" class="active">📹 Video ON</button>
+        </div>
+        <div class="call-actions">
+            <button id="accept-call-btn">Accept</button>
+            <button id="reject-call-btn">Reject</button>
+        </div>
     </div>
 
+    <!-- Status Viewer Modal -->
     <div id="status-viewer" class="hidden">
         <button id="close-viewer-btn">&times;</button>
         <img id="viewer-image" src="" alt="Status full view">

@@ -26,21 +26,20 @@ app.use('/uploads', express.static(uploadsDir));
 // --- MongoDB Connection ---
 const mongoUrl = process.env.MONGO_URI;
 const client = new MongoClient(mongoUrl);
-let usersCollection, statusesCollection;
+let usersCollection, statusesCollection, messagesCollection;
 
 async function connectMongo() {
     try {
         await client.connect();
         console.log("MongoDB connected successfully!");
-        const db = client.db("off_chat_app_v5");
+        const db = client.db("off_chat_app_v6"); // New DB version for this feature set
         usersCollection = db.collection("users");
         statusesCollection = db.collection("statuses");
+        messagesCollection = db.collection("messages"); // Collection for persistent messages
         
-        // Ensure usernames are unique
         await usersCollection.createIndex({ username: 1 }, { unique: true });
         
-        // **FIXED LOGIC**: Directly create the TTL index.
-        // This command is idempotent and will create the collection if it's missing.
+        // Use the corrected, idempotent method for creating the TTL index
         await statusesCollection.createIndex(
             { "timestamp": 1 },
             { expireAfterSeconds: 43200 } // 12 hours
@@ -66,10 +65,7 @@ app.post('/upload-status', upload.single('statusImage'), async (req, res) => {
     try {
         const fileName = `${Date.now()}-${username}.jpeg`;
         const filePath = path.join(uploadsDir, fileName);
-        await sharp(req.file.buffer)
-            .resize(800)
-            .jpeg({ quality: 70, progressive: true, force: true })
-            .toFile(filePath);
+        await sharp(req.file.buffer).resize(800).jpeg({ quality: 70 }).toFile(filePath);
         const fileUrl = `/uploads/${fileName}`;
         const statusData = { username, imageUrl: fileUrl, timestamp: new Date() };
         const result = await statusesCollection.insertOne(statusData);
@@ -149,16 +145,36 @@ io.on('connection', (socket) => {
         }
     });
 
-    // 3. Private Messaging
-    socket.on('private-message', ({ recipient, text }) => {
-        const messageData = { sender: socket.username, recipient, text, timestamp: new Date() };
+    // 3. Private Messaging with Persistence
+    socket.on('private-message', async ({ recipient, text }) => {
+        const messageData = {
+            sender: socket.username,
+            recipient: recipient,
+            text: text,
+            timestamp: new Date()
+        };
+        await messagesCollection.insertOne(messageData);
         const recipientSocketId = onlineUsers[recipient];
         if (recipientSocketId) {
             io.to(recipientSocketId).to(socket.id).emit('private-message', messageData);
+        } else {
+            socket.emit('private-message', messageData);
         }
     });
+    
+    // 4. Fetch Chat History
+    socket.on('get-chat-history', async ({ friendUsername }, callback) => {
+        const username = socket.username;
+        const history = await messagesCollection.find({
+            $or: [
+                { sender: username, recipient: friendUsername },
+                { sender: friendUsername, recipient: username }
+            ]
+        }).sort({ timestamp: 1 }).toArray();
+        callback(history);
+    });
 
-    // 4. WebRTC Signaling
+    // 5. WebRTC Signaling
     socket.on('call-user', (data) => {
         if (onlineUsers[data.recipient]) io.to(onlineUsers[data.recipient]).emit('call-made', { offer: data.offer, sender: socket.username });
     });
@@ -169,7 +185,7 @@ io.on('connection', (socket) => {
         if (onlineUsers[data.recipient]) io.to(onlineUsers[data.recipient]).emit('ice-candidate', { candidate: data.candidate, sender: socket.username });
     });
 
-    // 5. Status Feature Socket Logic
+    // 6. Status Feature Logic
     socket.on('get-statuses', async (callback) => {
         try {
             const statuses = await statusesCollection.find().sort({ timestamp: -1 }).toArray();
@@ -198,7 +214,7 @@ io.on('connection', (socket) => {
         }
     });
     
-    // 6. Disconnect
+    // 7. Disconnect
     socket.on('disconnect', async () => {
         if (socket.username) {
             const username = socket.username;
