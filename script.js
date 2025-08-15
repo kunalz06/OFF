@@ -76,7 +76,8 @@ document.addEventListener('DOMContentLoaded', () => {
             localVideo.srcObject = localStream;
         } catch (error) { 
             console.error("Error accessing media devices.", error);
-            // If user denies, create a stream without media tracks
+            alert("Camera/mic permissions are needed for calling. You can still use chat and status features.");
+            // Create a silent stream if permissions are denied, so the app doesn't crash
             localStream = new MediaStream();
         }
     }
@@ -90,7 +91,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function showNotification(title, body) {
         if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {
-            new Notification(title, { body, icon: '/favicon.ico' }); // Optional: add an icon
+            new Notification(title, { body });
         }
     }
 
@@ -283,19 +284,29 @@ document.addEventListener('DOMContentLoaded', () => {
         if (cardToRemove) cardToRemove.remove();
     });
 
-    // --- 7. WebRTC Calling Logic ---
+    // --- 7. WebRTC Calling Logic (Corrected and Final) ---
     function createPeerConnection(recipient) {
         peerConnection = new RTCPeerConnection(stunServers);
-        peerConnection.ontrack = (event) => { remoteVideo.srcObject = event.streams[0]; };
+
+        // **FIX**: Set up the ontrack event handler immediately.
+        peerConnection.ontrack = (event) => {
+            remoteVideo.srcObject = event.streams[0];
+        };
+
         peerConnection.onicecandidate = (event) => {
             if (event.candidate) socket.emit('ice-candidate', { recipient, candidate: event.candidate });
         };
+
         if (localStream) {
             localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
         }
     }
 
     async function startCall(recipient) {
+        if (!localStream || localStream.getTracks().length === 0) {
+            alert("Cannot start call. Check camera/microphone permissions.");
+            return;
+        }
         callModal.classList.remove('hidden');
         callStatus.textContent = `Calling ${recipient}...`;
         createPeerConnection(recipient);
@@ -328,16 +339,23 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         try {
-            localStream.getTracks().forEach(track => track.stop()); // Stop previous stream
+            // Stop any existing tracks before getting new ones
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+            }
             localStream = await navigator.mediaDevices.getUserMedia({ audio: isAudioEnabled, video: isVideoEnabled });
             localVideo.srcObject = localStream;
+
+            // Sync in-call buttons with pre-call choices
             toggleAudioBtn.classList.toggle('muted', !isAudioEnabled);
             toggleAudioBtn.textContent = isAudioEnabled ? '🎤' : '🔇';
             toggleVideoBtn.classList.toggle('off', !isVideoEnabled);
             toggleVideoBtn.textContent = isVideoEnabled ? '📹' : '📸';
+
             incomingCallToast.classList.add('hidden');
             callModal.classList.remove('hidden');
             callStatus.textContent = `In call with ${incomingCallData.sender}`;
+            
             createPeerConnection(incomingCallData.sender);
             await peerConnection.setRemoteDescription(new RTCSessionDescription(incomingCallData.offer));
             const answer = await peerConnection.createAnswer();
@@ -367,7 +385,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const audioTrack = localStream.getAudioTracks()[0];
         if (audioTrack) {
             audioTrack.enabled = !audioTrack.enabled;
-            toggleAudioBtn.classList.toggle('muted', !audioTrack.enabled);
+            toggleAudio-btn.classList.toggle('muted', !audioTrack.enabled);
             toggleAudioBtn.textContent = audioTrack.enabled ? '🎤' : '🔇';
         }
     });
