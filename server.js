@@ -1,7 +1,7 @@
 const express = require('express');
 const http = require('http');
 const { Server } = require("socket.io");
-const { MongoClient, ObjectId } = require('mongodb'); // Import ObjectId
+const { MongoClient, ObjectId } = require('mongodb');
 const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
@@ -32,27 +32,23 @@ async function connectMongo() {
     try {
         await client.connect();
         console.log("MongoDB connected successfully!");
-        const db = client.db("off_chat_app_v5"); // Using a new DB version
+        const db = client.db("off_chat_app_v5");
         usersCollection = db.collection("users");
         statusesCollection = db.collection("statuses");
         
         // Ensure usernames are unique
         await usersCollection.createIndex({ username: 1 }, { unique: true });
         
-        // TTL Index for auto-deletion after 12 hours (43200 seconds)
-        // First, check if the index already exists to avoid errors on restart
-        const indexes = await statusesCollection.indexes();
-        const ttlIndexExists = indexes.some(index => index.key.timestamp === 1 && index.expireAfterSeconds);
-        if (!ttlIndexExists) {
-            await statusesCollection.createIndex(
-                { "timestamp": 1 },
-                { expireAfterSeconds: 43200 }
-            );
-            console.log("TTL index created on statuses collection.");
-        }
+        // **FIXED LOGIC**: Directly create the TTL index.
+        // This command is idempotent and will create the collection if it's missing.
+        await statusesCollection.createIndex(
+            { "timestamp": 1 },
+            { expireAfterSeconds: 43200 } // 12 hours
+        );
+        console.log("TTL index on statuses collection ensured.");
 
     } catch (err) {
-        console.error("Failed to connect to MongoDB", err);
+        console.error("Error during MongoDB setup:", err);
         process.exit(1);
     }
 }
@@ -77,7 +73,6 @@ app.post('/upload-status', upload.single('statusImage'), async (req, res) => {
         const fileUrl = `/uploads/${fileName}`;
         const statusData = { username, imageUrl: fileUrl, timestamp: new Date() };
         const result = await statusesCollection.insertOne(statusData);
-        // Send the full status object including the new ID to clients
         io.emit('new-status-posted', { ...statusData, _id: result.insertedId });
         res.json({ success: true, fileUrl });
     } catch (error) {
