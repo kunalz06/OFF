@@ -2,77 +2,155 @@ document.addEventListener('DOMContentLoaded', () => {
     const socket = io();
 
     // --- Global State ---
-    let username = '';
+    let currentUser = { username: '', friends: [], friendRequests: [] };
     let activeChat = '';
+    let activeTab = 'chats';
     let peerConnection;
     let localStream;
     let screenStream;
+    let incomingCallData = null;
 
     // --- DOM Elements ---
     const loginScreen = document.getElementById('login-screen');
     const mainApp = document.getElementById('main-app');
     const usernameInput = document.getElementById('username-input');
     const joinBtn = document.getElementById('join-btn');
-    const userList = document.getElementById('user-list');
+    const contactList = document.getElementById('contact-list');
+    
+    // Tabs & Content
+    const tabLinks = document.querySelectorAll('.tab-link');
+    const tabContents = document.querySelectorAll('.tab-content');
     const chatWindow = document.getElementById('chat-window');
-    const statusWindow = document.getElementById('status-window');
     const welcomeScreen = document.getElementById('welcome-screen');
     const messagesContainer = document.getElementById('messages');
     const messageInput = document.getElementById('message-input');
     const sendBtn = document.getElementById('send-btn');
     const chatHeader = document.getElementById('chat-header');
-    const statusBtn = document.getElementById('status-btn');
-    const statusInput = document.getElementById('status-input');
-    const postStatusBtn = document.getElementById('post-status-btn');
-    const statusesFeed = document.getElementById('statuses-feed');
     
-    // Call Modal Elements
+    // Profile Tab
+    const profileUsername = document.getElementById('profile-username');
+    const addUsernameInput = document.getElementById('add-username-input');
+    const sendRequestBtn = document.getElementById('send-request-btn');
+    const friendRequestsList = document.getElementById('friend-requests-list');
+    
+    // Call Modal & Toast
     const callModal = document.getElementById('call-modal');
     const localVideo = document.getElementById('local-video');
     const remoteVideo = document.getElementById('remote-video');
     const screenShareBtn = document.getElementById('screen-share-btn');
     const endCallBtn = document.getElementById('end-call-btn');
+    const callStatus = document.getElementById('call-status');
+    const incomingCallToast = document.getElementById('incoming-call-toast');
+    const callerUsernameEl = document.getElementById('caller-username');
+    const acceptCallBtn = document.getElementById('accept-call-btn');
+    const rejectCallBtn = document.getElementById('reject-call-btn');
 
     const stunServers = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
-    // --- 1. Login Logic ---
+    // --- 1. Initialization & Login ---
     joinBtn.addEventListener('click', () => {
-        const name = usernameInput.value.trim();
-        if (name) {
-            username = name;
-            socket.emit('join', username);
-            loginScreen.classList.add('hidden');
-            mainApp.classList.remove('hidden');
-            initializeMedia();
+        const username = usernameInput.value.trim();
+        if (username) {
+            socket.emit('join', username, (response) => {
+                if (response.success) {
+                    currentUser = response.userData;
+                    loginScreen.classList.add('hidden');
+                    mainApp.classList.remove('hidden');
+                    initializeMedia();
+                    updateUI();
+                } else {
+                    alert(response.message);
+                }
+            });
         }
     });
 
-    // --- 2. User & Chat Management ---
-    socket.on('user-list', (users) => {
-        userList.innerHTML = '';
-        users.filter(u => u !== username).forEach(user => {
-            const userItem = document.createElement('div');
-            userItem.className = 'user-item';
-            userItem.innerText = user;
-            userItem.onclick = () => openChat(user);
-            userList.appendChild(userItem);
+    async function initializeMedia() {
+        try {
+            localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+            localVideo.srcObject = localStream;
+        } catch (error) { console.error("Error accessing media devices.", error); }
+    }
+
+    // --- 2. UI Management ---
+    function updateUI() {
+        profileUsername.textContent = `Welcome, ${currentUser.username}`;
+        
+        friendRequestsList.innerHTML = '';
+        if (currentUser.friendRequests && currentUser.friendRequests.length > 0) {
+            currentUser.friendRequests.forEach(username => {
+                const requestItem = document.createElement('div');
+                requestItem.className = 'request-item';
+                requestItem.innerHTML = `<span>${username}</span><button data-username="${username}">Accept</button>`;
+                friendRequestsList.appendChild(requestItem);
+            });
+        } else {
+            friendRequestsList.innerHTML = '<p>No new requests.</p>';
+        }
+
+        contactList.innerHTML = '';
+        if(currentUser.friends) {
+            currentUser.friends.forEach(username => {
+                const contactItem = document.createElement('div');
+                contactItem.className = 'contact-item';
+                contactItem.dataset.username = username;
+                contactItem.innerHTML = `<span>${username}</span><div class="status-indicator"></div>`;
+                contactItem.onclick = () => {
+                    if (activeTab === 'chats') openChat(username);
+                    if (activeTab === 'calls') startCall(username);
+                };
+                contactList.appendChild(contactItem);
+            });
+        }
+    }
+
+    tabLinks.forEach(link => {
+        link.addEventListener('click', () => {
+            const tabName = link.dataset.tab;
+            activeTab = tabName;
+            
+            tabLinks.forEach(l => l.classList.remove('active'));
+            link.classList.add('active');
+            
+            tabContents.forEach(c => c.classList.add('hidden'));
+            document.getElementById(`${tabName}-tab`).classList.remove('hidden');
+            
+            contactList.style.display = (tabName === 'chats' || tabName === 'calls') ? 'block' : 'none';
+            updateUI();
         });
     });
 
-    function openChat(user) {
-        activeChat = user;
+    // --- 3. Friend & Chat Logic ---
+    sendRequestBtn.addEventListener('click', () => {
+        const recipientUsername = addUsernameInput.value.trim();
+        if (recipientUsername) {
+            socket.emit('send-friend-request', { recipientUsername }, (response) => {
+                alert(response.message);
+                if(response.success) addUsernameInput.value = '';
+            });
+        }
+    });
+
+    friendRequestsList.addEventListener('click', (e) => {
+        if (e.target.tagName === 'BUTTON') {
+            const senderUsername = e.target.dataset.username;
+            socket.emit('accept-friend-request', senderUsername, (response) => {
+                if (response.success) {
+                    currentUser = response.userData;
+                    updateUI();
+                }
+            });
+        }
+    });
+
+    function openChat(username) {
+        activeChat = username;
         chatWindow.classList.remove('hidden');
-        statusWindow.classList.add('hidden');
         welcomeScreen.classList.add('hidden');
-        
-        chatHeader.innerHTML = `<span>${user}</span> <button id="call-btn">📞</button>`;
-        document.getElementById('call-btn').onclick = () => startCall(user);
-        
-        messagesContainer.innerHTML = ''; // Clear previous messages
-        // Here you would fetch message history from the server
+        chatHeader.textContent = username;
+        messagesContainer.innerHTML = '';
     }
-    
-    // --- 3. Private Messaging ---
+
     sendBtn.addEventListener('click', sendMessage);
     messageInput.addEventListener('keypress', (e) => (e.key === 'Enter') && sendMessage());
 
@@ -84,63 +162,45 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // --- 4. Real-time Socket Event Handlers ---
     socket.on('private-message', (msg) => {
-        if (msg.sender === activeChat || msg.sender === username) {
+        if (msg.sender === activeChat || msg.sender === currentUser.username) {
             const bubble = document.createElement('div');
-            bubble.className = 'message-bubble ' + (msg.sender === username ? 'sent' : 'received');
+            bubble.className = 'message-bubble ' + (msg.sender === currentUser.username ? 'sent' : 'received');
             bubble.innerText = msg.text;
             messagesContainer.appendChild(bubble);
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
         }
     });
 
-    // --- 4. Status Feature Logic ---
-    statusBtn.addEventListener('click', () => {
-        chatWindow.classList.add('hidden');
-        welcomeScreen.classList.add('hidden');
-        statusWindow.classList.remove('hidden');
-        fetchStatuses();
-    });
-
-    postStatusBtn.addEventListener('click', () => {
-        const text = statusInput.value.trim();
-        if (text) {
-            socket.emit('post-status', text);
-            statusInput.value = '';
+    socket.on('new-friend-request', (senderUsername) => {
+        if (!currentUser.friendRequests.includes(senderUsername)) {
+            currentUser.friendRequests.push(senderUsername);
         }
+        updateUI();
+        alert(`New friend request from ${senderUsername}!`);
     });
-
-    socket.on('new-status-posted', (status) => {
-        // Only refresh if the status window is active
-        if(!statusWindow.classList.contains('hidden')) {
-            prependStatus(status);
-        }
-    });
-
-    function fetchStatuses() {
-        socket.emit('get-statuses', (statuses) => {
-            statusesFeed.innerHTML = '';
-            statuses.forEach(status => prependStatus(status));
-        });
-    }
-
-    function prependStatus(status) {
-        const post = document.createElement('div');
-        post.className = 'status-post';
-        post.innerHTML = `<strong>${status.username}</strong><p>${status.text}</p><small>${new Date(status.timestamp).toLocaleTimeString()}</small>`;
-        statusesFeed.prepend(post);
-    }
     
-    // --- 5. Calling and Screen Sharing Logic ---
-    async function initializeMedia() {
-        try {
-            localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-            localVideo.srcObject = localStream;
-        } catch (error) { console.error("Error accessing media devices.", error); }
-    }
+    socket.on('request-accepted', (updatedUserData) => {
+        currentUser = updatedUserData;
+        updateUI();
+        alert(`Your friend request was accepted!`);
+    });
+    
+    socket.on('friend-online', (username) => {
+        const contact = document.querySelector(`.contact-item[data-username="${username}"] .status-indicator`);
+        if(contact) contact.classList.add('online');
+    });
+    
+    socket.on('friend-offline', (username) => {
+        const contact = document.querySelector(`.contact-item[data-username="${username}"] .status-indicator`);
+        if(contact) contact.classList.remove('online');
+    });
 
+    // --- 5. WebRTC Calling Logic ---
     async function startCall(recipient) {
         callModal.classList.remove('hidden');
+        callStatus.textContent = `Calling ${recipient}...`;
         createPeerConnection(recipient);
         const offer = await peerConnection.createOffer();
         await peerConnection.setLocalDescription(offer);
@@ -148,15 +208,26 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     
     socket.on('call-made', async (data) => {
-        const confirmed = confirm(`${data.sender} is calling you. Do you want to accept?`);
-        if (!confirmed) return;
-        
+        incomingCallData = data;
+        callerUsernameEl.textContent = data.sender;
+        incomingCallToast.classList.remove('hidden');
+    });
+
+    acceptCallBtn.addEventListener('click', async () => {
+        incomingCallToast.classList.add('hidden');
         callModal.classList.remove('hidden');
-        createPeerConnection(data.sender);
-        await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
+        callStatus.textContent = `In call with ${incomingCallData.sender}`;
+        createPeerConnection(incomingCallData.sender);
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(incomingCallData.offer));
         const answer = await peerConnection.createAnswer();
         await peerConnection.setLocalDescription(answer);
-        socket.emit('make-answer', { sender: data.sender, answer });
+        socket.emit('make-answer', { sender: incomingCallData.sender, answer });
+        incomingCallData = null;
+    });
+    
+    rejectCallBtn.addEventListener('click', () => {
+        incomingCallToast.classList.add('hidden');
+        incomingCallData = null;
     });
 
     socket.on('answer-made', async (data) => {
@@ -169,22 +240,15 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    screenShareBtn.addEventListener('click', toggleScreenShare);
-
     async function toggleScreenShare() {
         if (!screenStream) {
-            // Start screen sharing
             screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
             const screenTrack = screenStream.getVideoTracks()[0];
             const sender = peerConnection.getSenders().find(s => s.track.kind === 'video');
             sender.replaceTrack(screenTrack);
-            screenShareBtn.style.backgroundColor = '#e74c3c'; // Change color to indicate active
-            
-            screenTrack.onended = () => { // When user stops it from browser UI
-                toggleScreenShare();
-            };
+            screenShareBtn.style.backgroundColor = 'var(--error-color)';
+            screenTrack.onended = () => toggleScreenShare();
         } else {
-            // Stop screen sharing
             const cameraTrack = localStream.getVideoTracks()[0];
             const sender = peerConnection.getSenders().find(s => s.track.kind === 'video');
             sender.replaceTrack(cameraTrack);
@@ -193,6 +257,8 @@ document.addEventListener('DOMContentLoaded', () => {
             screenShareBtn.style.backgroundColor = '#3498db';
         }
     }
+    
+    screenShareBtn.addEventListener('click', toggleScreenShare);
 
     function createPeerConnection(recipient) {
         peerConnection = new RTCPeerConnection(stunServers);
@@ -210,10 +276,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     
     endCallBtn.addEventListener('click', () => {
-        if(peerConnection) {
+        if (peerConnection) {
             peerConnection.close();
             peerConnection = null;
         }
         callModal.classList.add('hidden');
+        remoteVideo.srcObject = null;
     });
 });

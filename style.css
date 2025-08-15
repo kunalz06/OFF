@@ -273,3 +273,119 @@ video {
 }
 #end-call-btn { background-color: #e74c3c; }
 #screen-share-btn { background-color: #3498db; }
+
+/* --- Core Variables & Global Styles --- */
+:root {
+    --primary-color: #6a11cb;
+    --secondary-color: #2575fc;
+    --dark-bg: #121212;
+    --light-bg: #1e1e1e;
+    --text-color: #ffffff;
+    --card-color: rgba(0, 0, 0, 0.4);
+    --success-color: #2ecc71;
+    --error-color: #e74c3c;
+}
+
+body {
+    margin: 0;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    color: var(--text-color);
+    overflow: hidden;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+}
+
+/* --- Animated Background --- */
+.background-3d {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: -1;
+    background: linear-gradient(45deg, var(--primary-color), var(--secondary-color), #ff0077, #ffde00);
+    background-size: 400% 400%;
+    animation: moveGradient 15s ease infinite;
+}
+
+@keyframes moveGradient {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+}
+
+/* --- Main Containers & Cards --- */
+.app-container {
+    width: 90%;
+    max-width: 1200px;
+    height: 90vh;
+    background: var(--card-color);
+    backdrop-filter: blur(15px);
+    border-radius: 20px;
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 20px;
+}
+
+.card { text-align: center; padding: 40px; }
+.card h2 { font-size: 2.5rem; margin-bottom: 10px; }
+.hidden { display: none !important; }
+
+/* --- Forms & Buttons --- */
+input[type="text"] { padding: 12px; width: 80%; border-radius: 8px; border: 1px solid #ccc; margin-top: 20px; background: #2a2a2a; color: white; font-size: 1rem; }
+button { padding: 12px 25px; border: none; background-color: var(--primary-color); color: white; border-radius: 8px; cursor: pointer; font-size: 1rem; margin-top: 20px; transition: background-color 0.3s ease; }
+button:hover { background-color: var(--secondary-color); }
+
+/* --- App Layout (Sidebar & Main Content) --- */
+#main-app { flex-direction: row; align-items: stretch; padding: 0; overflow: hidden; }
+#sidebar { width: 30%; max-width: 300px; background: rgba(0,0,0,0.2); display: flex; flex-direction: column; border-right: 1px solid rgba(255, 255, 255, 0.1); }
+#main-content { flex-grow: 1; display: flex; flex-direction: column; }
+
+/* --- Tabs & Navigation --- */
+.tab-nav { display: flex; justify-content: space-around; padding: 10px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.1); }
+.tab-link { background: none; margin: 0; padding: 10px; font-size: 1rem; color: #aaa; border-radius: 0; border-bottom: 2px solid transparent; }
+.tab-link.active { color: white; border-bottom: 2px solid var(--primary-color); }
+.tab-content { padding: 20px; height: 100%; overflow-y: auto; box-sizing: border-box; }
+.tab-content.active { display: block; } /* Use display block/none for active tabs */
+
+/* --- Contact List --- */
+#contact-list { flex-grow: 1; overflow-y: auto; }
+.contact-item { padding: 15px 20px; cursor: pointer; transition: background 0.2s; border-bottom: 1px solid rgba(255, 255, 255, 0.05); display: flex; align-items: center; justify-content: space-between; }
+.contact-item:hover { background: rgba(255, 255, 255, 0.1); }
+.status-indicator { width: 10px; height: 10px; border-radius: 50%; background-color: #ccc; /* Grey for offline */ }
+.status-indicator.online { background-color: var(--success-color); }
+
+/* --- Profile Tab --- */
+.profile-section { margin-top: 30px; }
+.add-contact-form { display: flex; gap: 10px; }
+#add-username-input { margin-top: 0; flex-grow: 1; }
+#send-request-btn { margin-top: 0; }
+#friend-requests-list .request-item { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: #2a2a2a; border-radius: 5px; margin-top: 10px; }
+.request-item button { margin: 0; padding: 5px 10px; font-size: 0.9rem; }
+
+/* --- Chat Window --- */
+#chat-window { display: flex; flex-direction: column; height: 100%; }
+#chat-header { padding: 15px 20px; background: rgba(0,0,0,0.3); font-size: 1.2rem; }
+#messages { flex-grow: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; }
+.message-bubble { padding: 10px 15px; border-radius: 20px; max-width: 70%; margin-bottom: 10px; word-wrap: break-word; }
+.sent { background-color: var(--primary-color); align-self: flex-end; }
+.received { background-color: #333; align-self: flex-start; }
+.input-area { padding: 15px; display: flex; background: rgba(0,0,0,0.3); }
+
+/* --- Call Modal & Toast Notification --- */
+#call-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); backdrop-filter: blur(10px); display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 100; }
+#call-modal .video-container { display: flex; gap: 20px; width: 80%; }
+#call-modal video { width: 50%; border-radius: 10px; background: #000; }
+#call-modal .call-controls { margin-top: 20px; }
+#end-call-btn { background-color: var(--error-color); }
+#screen-share-btn { background-color: #3498db; }
+
+#incoming-call-toast { position: fixed; top: 20px; right: 20px; background: var(--light-bg); padding: 20px; border-radius: 10px; box-shadow: 0 5px 15px rgba(0,0,0,0.5); z-index: 101; }
+#incoming-call-toast button { margin: 0 5px; }
+#accept-call-btn { background-color: var(--success-color); }
+#reject-call-btn { background-color: var(--error-color); }

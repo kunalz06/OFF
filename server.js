@@ -1,24 +1,26 @@
 const express = require('express');
 const http = require('http');
 const { Server } = require("socket.io");
-const { MongoClient } = require('mongodb');
+const { MongoClient, ObjectId } = require('mongodb');
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
 // --- MongoDB Connection ---
-const mongoUrl = process.env.MONGO_URI;
+const mongoUrl = process.env.MONGO_URI; // Make sure to set this in your Render environment
 const client = new MongoClient(mongoUrl);
-let messagesCollection, statusesCollection;
+let usersCollection, messagesCollection;
 
 async function connectMongo() {
     try {
         await client.connect();
         console.log("MongoDB connected successfully!");
-        const db = client.db("off_chat_app_v2");
+        const db = client.db("off_chat_app_v3");
+        usersCollection = db.collection("users");
         messagesCollection = db.collection("messages");
-        statusesCollection = db.collection("statuses");
+        // Create a unique index on the username field to prevent duplicates
+        await usersCollection.createIndex({ username: 1 }, { unique: true });
     } catch (err) {
         console.error("Failed to connect to MongoDB", err);
         process.exit(1);
@@ -26,93 +28,164 @@ async function connectMongo() {
 }
 connectMongo();
 
-// In-memory user store for simplicity: { username: socketId }
+// In-memory store for quick lookups of online users: { username: socketId }
 let onlineUsers = {};
 
 app.use(express.static('.'));
 
+// Helper function to get a user's full data, including friends and requests
+const getUserData = async (username) => {
+    const user = await usersCollection.findOne({ username });
+    if (!user) return null;
+
+    // Populate friends and friendRequests arrays with usernames
+    const friends = await usersCollection.find({ _id: { $in: user.friends || [] } }).project({ username: 1 }).toArray();
+    const friendRequests = await usersCollection.find({ _id: { $in: user.friendRequests || [] } }).project({ username: 1 }).toArray();
+    
+    return {
+        username: user.username,
+        friends: friends.map(f => f.username),
+        friendRequests: friendRequests.map(fr => fr.username)
+    };
+};
+
+
 io.on('connection', (socket) => {
     console.log('A user connected:', socket.id);
 
-    // 1. User Joins
-    socket.on('join', (username) => {
-        socket.username = username;
-        onlineUsers[username] = socket.id;
-        socket.join(username); // Join a room with their own username
+    // 1. User Login/Registration
+    socket.on('join', async (username, callback) => {
+        try {
+            let user = await usersCollection.findOne({ username });
+            if (!user) {
+                // If user doesn't exist, create a new one
+                const newUser = { username, friends: [], friendRequests: [] };
+                await usersCollection.insertOne(newUser);
+            }
+            
+            socket.username = username;
+            onlineUsers[username] = socket.id;
 
-        // Inform others of the new user
-        io.emit('user-list', Object.keys(onlineUsers));
-        console.log(onlineUsers);
+            const userData = await getUserData(username);
+            callback({ success: true, userData });
+
+            // Notify friends that this user is online
+            userData.friends.forEach(friendUsername => {
+                const friendSocketId = onlineUsers[friendUsername];
+                if (friendSocketId) {
+                    io.to(friendSocketId).emit('friend-online', username);
+                }
+            });
+
+            console.log(`${username} has joined.`);
+        } catch (error) {
+            console.error("Join error:", error);
+            callback({ success: false, message: "Username might be taken or a database error occurred." });
+        }
+    });
+    
+    // 2. Friend Request System
+    socket.on('send-friend-request', async ({ recipientUsername }, callback) => {
+        const senderUsername = socket.username;
+        if (senderUsername === recipientUsername) {
+            return callback({ success: false, message: "You can't add yourself." });
+        }
+
+        const recipient = await usersCollection.findOne({ username: recipientUsername });
+        const sender = await usersCollection.findOne({ username: senderUsername });
+
+        if (!recipient) {
+            return callback({ success: false, message: "User not found." });
+        }
+        
+        // Check if already friends or a request is already pending
+        if (recipient.friendRequests?.some(id => id.equals(sender._id)) || recipient.friends?.some(id => id.equals(sender._id))) {
+             return callback({ success: false, message: "Request already sent or you are already friends." });
+        }
+
+        await usersCollection.updateOne({ _id: recipient._id }, { $addToSet: { friendRequests: sender._id } });
+
+        // Notify the recipient in real-time if they are online
+        const recipientSocketId = onlineUsers[recipientUsername];
+        if (recipientSocketId) {
+            io.to(recipientSocketId).emit('new-friend-request', senderUsername);
+        }
+        callback({ success: true, message: "Friend request sent!" });
     });
 
-    // 2. Private Messaging
-    socket.on('private-message', async (data) => {
-        const { recipient, text } = data;
+    socket.on('accept-friend-request', async (senderUsername, callback) => {
+        const recipientUsername = socket.username;
+        const recipient = await usersCollection.findOne({ username: recipientUsername });
+        const sender = await usersCollection.findOne({ username: senderUsername });
+
+        if (!sender) return callback({ success: false, message: "Sender not found." });
+
+        // Add each other to friends lists and remove the pending request
+        await usersCollection.updateOne({ _id: recipient._id }, { $addToSet: { friends: sender._id }, $pull: { friendRequests: sender._id } });
+        await usersCollection.updateOne({ _id: sender._id }, { $addToSet: { friends: recipient._id } });
+        
+        const updatedRecipientData = await getUserData(recipientUsername);
+        callback({ success: true, userData: updatedRecipientData });
+
+        // Notify the original sender that their request was accepted
+        const senderSocketId = onlineUsers[senderUsername];
+        if (senderSocketId) {
+            const updatedSenderData = await getUserData(senderUsername);
+            io.to(senderSocketId).emit('request-accepted', updatedSenderData);
+        }
+    });
+
+    // 3. Private Messaging
+    socket.on('private-message', async ({ recipient, text }) => {
+        const messageData = { sender: socket.username, recipient, text, timestamp: new Date() };
+        // You can save messages to DB here if desired
+        // await messagesCollection.insertOne(messageData);
+        
         const recipientSocketId = onlineUsers[recipient];
-
-        const messageData = {
-            sender: socket.username,
-            recipient: recipient,
-            text: text,
-            timestamp: new Date()
-        };
-
-        await messagesCollection.insertOne(messageData);
-
         if (recipientSocketId) {
-            // Send to recipient and sender
             io.to(recipientSocketId).to(socket.id).emit('private-message', messageData);
         }
     });
 
-    // 3. Status Updates (Feature like X/Instagram Stories)
-    socket.on('post-status', async (statusText) => {
-        const statusData = {
-            username: socket.username,
-            text: statusText,
-            timestamp: new Date()
-        };
-        await statusesCollection.insertOne(statusData);
-        // Announce new status so clients can refetch
-        io.emit('new-status-posted', statusData);
-    });
-
-    socket.on('get-statuses', async (callback) => {
-        const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-        const statuses = await statusesCollection.find({ timestamp: { $gte: twentyFourHoursAgo } }).sort({ timestamp: -1 }).toArray();
-        callback(statuses);
-    });
-
-    // 4. WebRTC Signaling for Private Calls
+    // 4. WebRTC Signaling for private calls
     socket.on('call-user', (data) => {
         const recipientSocketId = onlineUsers[data.recipient];
-        io.to(recipientSocketId).emit('call-made', {
-            offer: data.offer,
-            sender: socket.username
-        });
+        if (recipientSocketId) {
+            io.to(recipientSocketId).emit('call-made', { offer: data.offer, sender: socket.username });
+        }
     });
 
     socket.on('make-answer', (data) => {
         const senderSocketId = onlineUsers[data.sender];
-        io.to(senderSocketId).emit('answer-made', {
-            answer: data.answer
-        });
+        if (senderSocketId) {
+            io.to(senderSocketId).emit('answer-made', { answer: data.answer });
+        }
     });
 
     socket.on('ice-candidate', (data) => {
-        const recipientSocketId = onlineUsers[data.recipient];
-        io.to(recipientSocketId).emit('ice-candidate', {
-            candidate: data.candidate
-        });
+        const targetSocketId = onlineUsers[data.recipient];
+        if (targetSocketId) {
+            io.to(targetSocketId).emit('ice-candidate', { candidate: data.candidate, sender: socket.username });
+        }
     });
 
-
-    // 5. User Disconnects
+    // 5. User Disconnect
     socket.on('disconnect', () => {
         if (socket.username) {
-            delete onlineUsers[socket.username];
-            io.emit('user-list', Object.keys(onlineUsers));
-            console.log(`${socket.username} disconnected.`);
+            const username = socket.username;
+            delete onlineUsers[username];
+            // Notify friends that this user has gone offline
+            getUserData(username).then(userData => {
+                if (userData) {
+                    userData.friends.forEach(friendUsername => {
+                        const friendSocketId = onlineUsers[friendUsername];
+                        if (friendSocketId) {
+                            io.to(friendSocketId).emit('friend-offline', username);
+                        }
+                    });
+                }
+            });
+            console.log(`${username} disconnected.`);
         }
     });
 });
