@@ -389,3 +389,165 @@ button:hover { background-color: var(--secondary-color); }
 #incoming-call-toast button { margin: 0 5px; }
 #accept-call-btn { background-color: var(--success-color); }
 #reject-call-btn { background-color: var(--error-color); }
+
+/* --- Core Variables & Global Styles --- */
+:root {
+    /* ... (Unchanged) ... */
+    --line-color-1: rgba(255, 255, 255, 0.1);
+    --line-color-2: rgba(255, 0, 0, 0.2);
+}
+
+/* ... (body, .app-container, .card, etc. are unchanged) ... */
+
+/* --- NEW Subtle Black & White Background --- */
+.background-lines {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: -1;
+    background-color: #0a0a0a;
+    background-image: 
+        linear-gradient(var(--line-color-1) 1px, transparent 1px),
+        linear-gradient(90deg, var(--line-color-1) 1px, transparent 1px),
+        linear-gradient(var(--line-color-2) 1px, transparent 1px),
+        linear-gradient(90deg, var(--line-color-2) 1px, transparent 1px);
+    background-size: 50px 50px, 50px 50px, 150px 150px, 150px 150px;
+    animation: moveLines 20s linear infinite;
+}
+
+@keyframes moveLines {
+    0% { background-position: 0 0; }
+    100% { background-position: 150px 150px; }
+}
+
+/* --- Tabs & Navigation --- */
+/* Add Status to the nav grid */
+.tab-nav { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; /* 4 tabs */ }
+
+/* --- Status Tab Styles --- */
+#statuses-feed {
+    margin-top: 20px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 15px;
+}
+.status-card {
+    border-radius: 8px;
+    overflow: hidden;
+    background: #1a1a1a;
+    padding: 8px;
+}
+.status-card img {
+    width: 100%;
+    height: 200px;
+    object-fit: cover;
+    border-radius: 4px;
+}
+.status-card p {
+    margin: 8px 0 0;
+    font-size: 0.9rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* --- File Input Styling --- */
+.file-input-label {
+    background-color: var(--primary-color);
+    color: white;
+    padding: 10px 15px;
+    border-radius: 5px;
+    cursor: pointer;
+    display: inline-block;
+}
+#status-image-input {
+    display: none;
+}
+
+/* --- Call Control Buttons --- */
+#toggle-audio-btn, #toggle-video-btn {
+    background-color: var(--success-color);
+}
+#toggle-audio-btn.muted, #toggle-video-btn.off {
+    background-color: var(--error-color);
+}
+
+/* ... (All other previous styles remain the same) ... */
+:root {
+    --primary-color: #6a11cb;
+    --secondary-color: #2575fc;
+    --dark-bg: #121212;
+    --light-bg: #1e1e1e;
+    --text-color: #ffffff;
+    --card-color: rgba(0, 0, 0, 0.4);
+    --success-color: #2ecc71;
+    --error-color: #e74c3c;
+    --line-color-1: rgba(255, 255, 255, 0.05);
+    --line-color-2: rgba(255, 0, 0, 0.15);
+}
+
+body {
+    margin: 0;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    color: var(--text-color);
+    overflow: hidden;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    background-color: #0a0a0a;
+}
+
+.background-lines {
+    position: fixed;
+    top: 0; left: 0; width: 100%; height: 100%; z-index: -1;
+    background-image: 
+        linear-gradient(var(--line-color-1) 1px, transparent 1px),
+        linear-gradient(90deg, var(--line-color-1) 1px, transparent 1px),
+        linear-gradient(var(--line-color-2) 1px, transparent 1px),
+        linear-gradient(90deg, var(--line-color-2) 1px, transparent 1px);
+    background-size: 50px 50px, 50px 50px, 125px 125px, 125px 125px;
+    animation: moveLines 20s linear infinite;
+}
+
+@keyframes moveLines {
+    0% { background-position: 0 0; }
+    100% { background-position: 250px 250px; }
+}
+
+.app-container { /* ... (Unchanged) ... */ }
+.card { /* ... (Unchanged) ... */ }
+input[type="text"] { /* ... (Unchanged) ... */ }
+button { /* ... (Unchanged) ... */ }
+
+.tab-nav { display: grid; grid-template-columns: repeat(4, 1fr); }
+.tab-link { /* ... (Unchanged) ... */ }
+
+#statuses-feed {
+    margin-top: 20px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 15px;
+    overflow-y: auto;
+    max-height: calc(90vh - 150px);
+}
+.status-card {
+    border-radius: 8px; overflow: hidden; background: #1a1a1a; padding: 8px;
+}
+.status-card img {
+    width: 100%; height: 200px; object-fit: cover; border-radius: 4px;
+}
+.status-card p {
+    margin: 8px 0 0; font-size: 0.9rem;
+}
+.file-input-label {
+    background-color: var(--primary-color); padding: 10px 15px; border-radius: 5px; cursor: pointer; display: inline-block;
+}
+#status-image-input { display: none; }
+
+#toggle-audio-btn, #toggle-video-btn { background-color: var(--secondary-color); }
+#toggle-audio-btn.muted, #toggle-video-btn.off { background-color: var(--error-color); }
+
+/* ... (All other previous styles for chat, profile, etc. remain the same) ... */
