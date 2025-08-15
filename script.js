@@ -42,6 +42,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const callerUsernameEl = document.getElementById('caller-username');
     const acceptCallBtn = document.getElementById('accept-call-btn');
     const rejectCallBtn = document.getElementById('reject-call-btn');
+    const statusViewer = document.getElementById('status-viewer');
+    const viewerImage = document.getElementById('viewer-image');
+    const closeViewerBtn = document.getElementById('close-viewer-btn');
 
     const stunServers = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
@@ -140,9 +143,47 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderStatus(status) {
         const card = document.createElement('div');
         card.className = 'status-card';
-        card.innerHTML = `<img src="${status.imageUrl}" alt="Status by ${status.username}"><p><strong>${status.username}</strong></p>`;
+        card.dataset.statusId = status._id;
+        card.dataset.imageUrl = status.imageUrl;
+
+        let deleteButtonHTML = '';
+        if (currentUser.username === status.username) {
+            deleteButtonHTML = `<button class="delete-status-btn" data-status-id="${status._id}">&times;</button>`;
+        }
+
+        card.innerHTML = `
+            <img src="${status.imageUrl}" alt="Status by ${status.username}">
+            <p><strong>${status.username}</strong></p>
+            ${deleteButtonHTML}
+        `;
         statusesFeed.prepend(card);
     }
+
+    statusesFeed.addEventListener('click', (e) => {
+        const target = e.target;
+        if (target.classList.contains('delete-status-btn')) {
+            e.stopPropagation();
+            const statusId = target.dataset.statusId;
+            if (confirm('Are you sure you want to delete this status?')) {
+                socket.emit('delete-status', statusId, (response) => {
+                    if (!response.success) {
+                        alert(`Error: ${response.message}`);
+                    }
+                });
+            }
+        } else {
+            const card = target.closest('.status-card');
+            if (card) {
+                viewerImage.src = card.dataset.imageUrl;
+                statusViewer.classList.remove('hidden');
+            }
+        }
+    });
+
+    closeViewerBtn.addEventListener('click', () => {
+        statusViewer.classList.add('hidden');
+        viewerImage.src = '';
+    });
 
     // --- 4. Friend & Chat Logic ---
     sendRequestBtn.addEventListener('click', () => {
@@ -205,7 +246,7 @@ document.addEventListener('DOMContentLoaded', () => {
     socket.on('request-accepted', (updatedUserData) => {
         currentUser = updatedUserData;
         updateUI();
-        alert(`${updatedUserData.friends.find(f => f !== currentUser.username)} accepted your friend request!`);
+        alert(`Your friend request was accepted!`);
     });
     socket.on('friend-online', (username) => {
         const indicator = document.querySelector(`.contact-item[data-username="${username}"] .status-indicator`);
@@ -218,29 +259,24 @@ document.addEventListener('DOMContentLoaded', () => {
     socket.on('new-status-posted', (status) => {
         if (activeTab === 'status') renderStatus(status);
     });
+    socket.on('status-deleted', (statusId) => {
+        const cardToRemove = document.querySelector(`.status-card[data-status-id="${statusId}"]`);
+        if (cardToRemove) {
+            cardToRemove.remove();
+        }
+    });
 
     // --- 6. WebRTC Calling Logic ---
     function createPeerConnection(recipient) {
         peerConnection = new RTCPeerConnection(stunServers);
-
-        // ** THE FIX IS HERE **
-        // This event handler is now set up immediately, ensuring it's ready to receive the track.
         peerConnection.ontrack = (event) => {
-            console.log("Received remote track!");
             remoteVideo.srcObject = event.streams[0];
         };
-        
         peerConnection.onicecandidate = (event) => {
-            if (event.candidate) {
-                socket.emit('ice-candidate', { recipient, candidate: event.candidate });
-            }
+            if (event.candidate) socket.emit('ice-candidate', { recipient, candidate: event.candidate });
         };
-
-        // Add local tracks to the connection so they can be sent
         if (localStream) {
-            localStream.getTracks().forEach(track => {
-                peerConnection.addTrack(track, localStream);
-            });
+            localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
         }
     }
 
@@ -277,15 +313,11 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     socket.on('answer-made', async (data) => {
-        if (peerConnection) {
-            await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
-        }
+        if (peerConnection) await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
     });
 
     socket.on('ice-candidate', (data) => {
-        if (peerConnection) {
-            peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
-        }
+        if (peerConnection) peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
     });
 
     toggleAudioBtn.addEventListener('click', () => {
@@ -310,9 +342,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (screenStream && screenStream.active) {
             const cameraTrack = localStream.getVideoTracks()[0];
             const sender = peerConnection.getSenders().find(s => s.track.kind === 'video');
-            if (sender) {
-                sender.replaceTrack(cameraTrack);
-            }
+            if (sender) sender.replaceTrack(cameraTrack);
             screenStream.getTracks().forEach(track => track.stop());
             screenStream = null;
             screenShareBtn.style.backgroundColor = '#3498db';
@@ -320,16 +350,12 @@ document.addEventListener('DOMContentLoaded', () => {
             screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
             const screenTrack = screenStream.getVideoTracks()[0];
             const sender = peerConnection.getSenders().find(s => s.track.kind === 'video');
-            if (sender) {
-                sender.replaceTrack(screenTrack);
-            }
+            if (sender) sender.replaceTrack(screenTrack);
             screenShareBtn.style.backgroundColor = 'var(--error-color)';
             screenTrack.onended = () => {
                 if (peerConnection && peerConnection.connectionState === 'connected') {
                     const cameraTrack = localStream.getVideoTracks()[0];
-                    if (sender) {
-                       sender.replaceTrack(cameraTrack);
-                    }
+                    if (sender) sender.replaceTrack(cameraTrack);
                     screenStream = null;
                     screenShareBtn.style.backgroundColor = '#3498db';
                 }

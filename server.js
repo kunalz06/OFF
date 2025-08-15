@@ -1,7 +1,7 @@
 const express = require('express');
 const http = require('http');
 const { Server } = require("socket.io");
-const { MongoClient } = require('mongodb');
+const { MongoClient, ObjectId } = require('mongodb'); // Import ObjectId
 const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
@@ -32,10 +32,25 @@ async function connectMongo() {
     try {
         await client.connect();
         console.log("MongoDB connected successfully!");
-        const db = client.db("off_chat_app_v4");
+        const db = client.db("off_chat_app_v5"); // Using a new DB version
         usersCollection = db.collection("users");
         statusesCollection = db.collection("statuses");
+        
+        // Ensure usernames are unique
         await usersCollection.createIndex({ username: 1 }, { unique: true });
+        
+        // TTL Index for auto-deletion after 12 hours (43200 seconds)
+        // First, check if the index already exists to avoid errors on restart
+        const indexes = await statusesCollection.indexes();
+        const ttlIndexExists = indexes.some(index => index.key.timestamp === 1 && index.expireAfterSeconds);
+        if (!ttlIndexExists) {
+            await statusesCollection.createIndex(
+                { "timestamp": 1 },
+                { expireAfterSeconds: 43200 }
+            );
+            console.log("TTL index created on statuses collection.");
+        }
+
     } catch (err) {
         console.error("Failed to connect to MongoDB", err);
         process.exit(1);
@@ -52,20 +67,18 @@ app.post('/upload-status', upload.single('statusImage'), async (req, res) => {
     if (!username || !req.file) {
         return res.status(400).json({ success: false, message: 'Missing username or file.' });
     }
-    
     try {
         const fileName = `${Date.now()}-${username}.jpeg`;
         const filePath = path.join(uploadsDir, fileName);
-
         await sharp(req.file.buffer)
             .resize(800)
             .jpeg({ quality: 70, progressive: true, force: true })
             .toFile(filePath);
-        
         const fileUrl = `/uploads/${fileName}`;
         const statusData = { username, imageUrl: fileUrl, timestamp: new Date() };
-        await statusesCollection.insertOne(statusData);
-        io.emit('new-status-posted', statusData);
+        const result = await statusesCollection.insertOne(statusData);
+        // Send the full status object including the new ID to clients
+        io.emit('new-status-posted', { ...statusData, _id: result.insertedId });
         res.json({ success: true, fileUrl });
     } catch (error) {
         console.error('Upload Error:', error);
@@ -108,29 +121,18 @@ io.on('connection', (socket) => {
         }
     });
 
-    // 2. Friend Request System (Reviewed and Fortified)
+    // 2. Friend Request System
     socket.on('send-friend-request', async ({ recipientUsername }, callback) => {
         const senderUsername = socket.username;
-        if (senderUsername === recipientUsername) {
-            return callback({ success: false, message: "You can't add yourself." });
-        }
-
+        if (senderUsername === recipientUsername) return callback({ success: false, message: "You can't add yourself." });
         const recipient = await usersCollection.findOne({ username: recipientUsername });
         const sender = await usersCollection.findOne({ username: senderUsername });
-
-        if (!sender) {
-            return callback({ success: false, message: "Could not identify sender. Please try logging in again." });
-        }
-        if (!recipient) {
-            return callback({ success: false, message: "User not found." });
-        }
-        
+        if (!sender) return callback({ success: false, message: "Could not identify sender." });
+        if (!recipient) return callback({ success: false, message: "User not found." });
         if (recipient.friendRequests?.some(id => id.equals(sender._id)) || recipient.friends?.some(id => id.equals(sender._id))) {
              return callback({ success: false, message: "Request already sent or you are already friends." });
         }
-
         await usersCollection.updateOne({ _id: recipient._id }, { $addToSet: { friendRequests: sender._id } });
-
         if (onlineUsers[recipientUsername]) {
             io.to(onlineUsers[recipientUsername]).emit('new-friend-request', senderUsername);
         }
@@ -141,17 +143,11 @@ io.on('connection', (socket) => {
         const recipientUsername = socket.username;
         const recipient = await usersCollection.findOne({ username: recipientUsername });
         const sender = await usersCollection.findOne({ username: senderUsername });
-
-        if (!sender || !recipient) {
-            return callback({ success: false, message: "User not found." });
-        }
-
+        if (!sender || !recipient) return callback({ success: false, message: "User not found." });
         await usersCollection.updateOne({ _id: recipient._id }, { $addToSet: { friends: sender._id }, $pull: { friendRequests: sender._id } });
         await usersCollection.updateOne({ _id: sender._id }, { $addToSet: { friends: recipient._id } });
-        
         const updatedRecipientData = await getUserData(recipientUsername);
         callback({ success: true, userData: updatedRecipientData });
-
         if (onlineUsers[senderUsername]) {
             const updatedSenderData = await getUserData(senderUsername);
             io.to(onlineUsers[senderUsername]).emit('request-accepted', updatedSenderData);
@@ -178,11 +174,10 @@ io.on('connection', (socket) => {
         if (onlineUsers[data.recipient]) io.to(onlineUsers[data.recipient]).emit('ice-candidate', { candidate: data.candidate, sender: socket.username });
     });
 
-    // 5. Status Feature
+    // 5. Status Feature Socket Logic
     socket.on('get-statuses', async (callback) => {
         try {
-            const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-            const statuses = await statusesCollection.find({ timestamp: { $gte: twentyFourHoursAgo } }).sort({ timestamp: -1 }).toArray();
+            const statuses = await statusesCollection.find().sort({ timestamp: -1 }).toArray();
             callback(statuses);
         } catch (error) {
             console.error('Error fetching statuses:', error);
@@ -190,6 +185,24 @@ io.on('connection', (socket) => {
         }
     });
 
+    socket.on('delete-status', async (statusId, callback) => {
+        if (!socket.username) return callback({ success: false, message: 'Authentication error.' });
+        try {
+            const status = await statusesCollection.findOne({ _id: new ObjectId(statusId) });
+            if (!status || status.username !== socket.username) return callback({ success: false, message: 'Unauthorized.' });
+            await statusesCollection.deleteOne({ _id: new ObjectId(statusId) });
+            const imagePath = path.join(__dirname, status.imageUrl);
+            fs.unlink(imagePath, (err) => {
+                if (err) console.error("Error deleting status image file:", err);
+            });
+            io.emit('status-deleted', statusId);
+            callback({ success: true });
+        } catch (error) {
+            console.error("Error deleting status:", error);
+            callback({ success: false, message: 'Server error.' });
+        }
+    });
+    
     // 6. Disconnect
     socket.on('disconnect', async () => {
         if (socket.username) {
