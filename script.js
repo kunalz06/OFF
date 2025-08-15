@@ -9,10 +9,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let localStream;
     let screenStream;
     let incomingCallData = null;
-    let isPolite = false;
-    let isMakingOffer = false;
-    let isIgnoringOffer = false;
-    let isBusy = false; // State to track if user is in a call or has a notification
+    let isBusy = false;
+    let iceCandidateQueue = [];
 
     // --- DOM Elements ---
     const loginScreen = document.getElementById('login-screen');
@@ -284,8 +282,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (cardToRemove) cardToRemove.remove();
     });
 
-    // --- 5. WebRTC Calling Logic (with Busy State and Perfect Negotiation) ---
+    // --- 5. WebRTC Calling Logic (Final Robust Version) ---
     function createPeerConnection(recipient) {
+        iceCandidateQueue = [];
         peerConnection = new RTCPeerConnection(stunServers);
 
         peerConnection.ontrack = (event) => {
@@ -300,18 +299,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         };
 
-        peerConnection.onnegotiationneeded = async () => {
-            try {
-                isMakingOffer = true;
-                await peerConnection.setLocalDescription();
-                socket.emit('call-user', { recipient, offer: peerConnection.localDescription });
-            } catch (err) {
-                console.error("Error during negotiation:", err);
-            } finally {
-                isMakingOffer = false;
-            }
-        };
-
         if (localStream) {
             localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
         }
@@ -322,11 +309,13 @@ document.addEventListener('DOMContentLoaded', () => {
             alert("Cannot start call. Check camera/microphone permissions.");
             return;
         }
-        isPolite = true;
-        isBusy = true; // Set busy when initiating a call
+        isBusy = true;
         callModal.classList.remove('hidden');
         callStatus.textContent = `Calling ${recipient}...`;
         createPeerConnection(recipient);
+        const offer = await peerConnection.createOffer();
+        await peerConnection.setLocalDescription(offer);
+        socket.emit('call-user', { recipient, offer });
     }
 
     socket.on('call-made', async (data) => {
@@ -336,14 +325,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         
         isBusy = true;
-        const offer = data.offer;
-        const offerCollision = (isMakingOffer || peerConnection?.signalingState !== "stable");
-        isIgnoringOffer = !isPolite && offerCollision;
-        if (isIgnoringOffer) {
-            isBusy = false;
-            return;
-        }
-
         incomingCallData = data;
         callerUsernameEl.textContent = data.sender;
         incomingCallToast.classList.remove('hidden');
@@ -377,10 +358,16 @@ document.addEventListener('DOMContentLoaded', () => {
         callModal.classList.remove('hidden');
         callStatus.textContent = `In call with ${incomingCallData.sender}`;
         
-        isPolite = false;
         createPeerConnection(incomingCallData.sender);
         
         await peerConnection.setRemoteDescription(new RTCSessionDescription(incomingCallData.offer));
+        
+        // Process any candidates that arrived early
+        for (const candidate of iceCandidateQueue) {
+            await peerConnection.addIceCandidate(candidate);
+        }
+        iceCandidateQueue = [];
+        
         const answer = await peerConnection.createAnswer();
         await peerConnection.setLocalDescription(answer);
         socket.emit('make-answer', { sender: incomingCallData.sender, answer });
@@ -397,20 +384,24 @@ document.addEventListener('DOMContentLoaded', () => {
     socket.on('answer-made', async (data) => {
         if (peerConnection) {
             await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+            // Process any candidates that arrived early
+            for (const candidate of iceCandidateQueue) {
+                await peerConnection.addIceCandidate(candidate);
+            }
+            iceCandidateQueue = [];
         }
     });
 
-    socket.on('ice-candidate', (data) => {
-        if (peerConnection) {
-            peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate))
-                .catch(err => {
-                    if (!isIgnoringOffer) {
-                        console.error("Error adding received ICE candidate:", err);
-                    }
-                });
+    socket.on('ice-candidate', async (data) => {
+        const candidate = new RTCIceCandidate(data.candidate);
+        if (peerConnection && peerConnection.remoteDescription) {
+            await peerConnection.addIceCandidate(candidate);
+        } else {
+            // Queue the candidate if the remote description isn't set yet
+            iceCandidateQueue.push(candidate);
         }
     });
-
+    
     socket.on('call-rejected', (data) => {
         alert(data.reason || `${data.recipient} rejected the call.`);
         endCall();
@@ -465,9 +456,6 @@ document.addEventListener('DOMContentLoaded', () => {
             peerConnection = null;
         }
         isBusy = false;
-        isPolite = false;
-        isMakingOffer = false;
-        isIgnoringOffer = false;
         callModal.classList.add('hidden');
         remoteVideo.srcObject = null;
     }
