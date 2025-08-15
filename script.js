@@ -13,7 +13,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // **FIX: Perfect Negotiation State Variables**
     let isMakingOffer = false;
     let isIgnoringOffer = false;
-    let isPolite = false; // Will be determined when a call starts
+    let isPolite = false;
 
     // --- DOM Elements ---
     const loginScreen = document.getElementById('login-screen');
@@ -98,35 +98,203 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // --- 3. UI, Status, Friend, and Chat Logic (Unchanged) ---
-    function updateUI() { /* ... */ }
-    tabLinks.forEach(link => { /* ... */ });
-    statusImageInput.addEventListener('change', (e) => { /* ... */ });
-    function fetchStatuses() { /* ... */ }
-    function renderStatus(status) { /* ... */ }
-    statusesFeed.addEventListener('click', (e) => { /* ... */ });
-    closeViewerBtn.addEventListener('click', () => { /* ... */ });
-    sendRequestBtn.addEventListener('click', () => { /* ... */ });
-    friendRequestsList.addEventListener('click', (e) => { /* ... */ });
-    function openChat(username) { /* ... */ }
-    function renderMessage(msg) { /* ... */ }
-    function sendMessage() { /* ... */ }
+    // --- 3. UI Management ---
+    function updateUI() {
+        profileUsername.textContent = `Welcome, ${currentUser.username}`;
+        friendRequestsList.innerHTML = '';
+        if (currentUser.friendRequests && currentUser.friendRequests.length > 0) {
+            currentUser.friendRequests.forEach(username => {
+                const item = document.createElement('div');
+                item.className = 'request-item';
+                item.innerHTML = `<span>${username}</span><button data-username="${username}">Accept</button>`;
+                friendRequestsList.appendChild(item);
+            });
+        } else {
+            friendRequestsList.innerHTML = '<p>No new requests.</p>';
+        }
+        contactList.innerHTML = '';
+        if (currentUser.friends) {
+            currentUser.friends.forEach(username => {
+                const item = document.createElement('div');
+                item.className = 'contact-item';
+                item.dataset.username = username;
+                item.innerHTML = `<span>${username}</span><div class="status-indicator"></div>`;
+                item.onclick = () => {
+                    if (activeTab === 'chats') openChat(username);
+                    if (activeTab === 'calls') startCall(username);
+                };
+                contactList.appendChild(item);
+            });
+        }
+    }
+
+    tabLinks.forEach(link => {
+        link.addEventListener('click', () => {
+            activeTab = link.dataset.tab;
+            tabLinks.forEach(l => l.classList.remove('active'));
+            link.classList.add('active');
+            tabContents.forEach(c => c.classList.add('hidden'));
+            document.getElementById(`${activeTab}-tab`).classList.remove('hidden');
+            const showContacts = (activeTab === 'chats' || activeTab === 'calls');
+            contactList.style.display = showContacts ? 'block' : 'none';
+            if (showContacts) updateUI();
+            if (activeTab === 'status') fetchStatuses();
+        });
+    });
+
+    // --- 4. Status Feature Logic ---
+    statusImageInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const formData = new FormData();
+        formData.append('username', currentUser.username);
+        formData.append('statusImage', file);
+        fetch('/upload-status', { method: 'POST', body: formData })
+            .then(res => res.json())
+            .then(data => {
+                if (!data.success) alert('Upload failed!');
+                statusImageInput.value = '';
+            })
+            .catch(err => console.error('Upload error:', err));
+    });
+
+    function fetchStatuses() {
+        socket.emit('get-statuses', (statuses) => {
+            statusesFeed.innerHTML = '';
+            statuses.forEach(status => renderStatus(status));
+        });
+    }
+
+    function renderStatus(status) {
+        const card = document.createElement('div');
+        card.className = 'status-card';
+        card.dataset.statusId = status._id;
+        card.dataset.imageUrl = status.imageUrl;
+        let deleteButtonHTML = '';
+        if (currentUser.username === status.username) {
+            deleteButtonHTML = `<button class="delete-status-btn" data-status-id="${status._id}">&times;</button>`;
+        }
+        card.innerHTML = `<img src="${status.imageUrl}" alt="Status by ${status.username}"><p><strong>${status.username}</strong></p>${deleteButtonHTML}`;
+        statusesFeed.prepend(card);
+    }
+
+    statusesFeed.addEventListener('click', (e) => {
+        const target = e.target;
+        if (target.classList.contains('delete-status-btn')) {
+            e.stopPropagation();
+            const statusId = target.dataset.statusId;
+            if (confirm('Are you sure you want to delete this status?')) {
+                socket.emit('delete-status', statusId, (response) => {
+                    if (!response.success) alert(`Error: ${response.message}`);
+                });
+            }
+        } else {
+            const card = target.closest('.status-card');
+            if (card) {
+                viewerImage.src = card.dataset.imageUrl;
+                statusViewer.classList.remove('hidden');
+            }
+        }
+    });
+
+    closeViewerBtn.addEventListener('click', () => {
+        statusViewer.classList.add('hidden');
+        viewerImage.src = '';
+    });
+
+    // --- 5. Friend & Chat Logic ---
+    sendRequestBtn.addEventListener('click', () => {
+        const recipientUsername = addUsernameInput.value.trim();
+        if (recipientUsername) {
+            socket.emit('send-friend-request', { recipientUsername }, (response) => {
+                alert(response.message);
+                if (response.success) addUsernameInput.value = '';
+            });
+        }
+    });
+
+    friendRequestsList.addEventListener('click', (e) => {
+        if (e.target.tagName === 'BUTTON') {
+            const senderUsername = e.target.dataset.username;
+            socket.emit('accept-friend-request', senderUsername, (response) => {
+                if (response.success) currentUser = response.userData;
+                updateUI();
+            });
+        }
+    });
+
+    function openChat(username) {
+        activeChat = username;
+        chatWindow.classList.remove('hidden');
+        welcomeScreen.classList.add('hidden');
+        chatHeader.textContent = username;
+        messagesContainer.innerHTML = '';
+        socket.emit('get-chat-history', { friendUsername: username }, (history) => {
+            history.forEach(msg => renderMessage(msg));
+        });
+    }
+
+    function renderMessage(msg) {
+        const bubble = document.createElement('div');
+        bubble.className = `message-bubble ${msg.sender === currentUser.username ? 'sent' : 'received'}`;
+        bubble.innerText = msg.text;
+        messagesContainer.appendChild(bubble);
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+
+    function sendMessage() {
+        const text = messageInput.value.trim();
+        if (text && activeChat) {
+            socket.emit('private-message', { recipient: activeChat, text });
+            messageInput.value = '';
+        }
+    }
     sendBtn.addEventListener('click', sendMessage);
     messageInput.addEventListener('keypress', (e) => (e.key === 'Enter') && sendMessage());
-    socket.on('private-message', (msg) => { /* ... */ });
-    socket.on('new-friend-request', (senderUsername) => { /* ... */ });
-    socket.on('request-accepted', (updatedUserData) => { /* ... */ });
-    socket.on('friend-online', (username) => { /* ... */ });
-    socket.on('friend-offline', (username) => { /* ... */ });
-    socket.on('new-status-posted', (status) => { /* ... */ });
-    socket.on('status-deleted', (statusId) => { /* ... */ });
 
-    // --- 4. WebRTC Calling Logic (Corrected with Perfect Negotiation) ---
+    // --- 6. Real-time Socket Event Handlers ---
+    socket.on('private-message', (msg) => {
+        if (msg.sender === activeChat || msg.sender === currentUser.username) {
+            renderMessage(msg);
+        }
+        if (msg.sender !== currentUser.username && msg.sender !== activeChat) {
+            showNotification(`New Message from ${msg.sender}`, msg.text);
+        }
+    });
+    socket.on('new-friend-request', (senderUsername) => {
+        if (!currentUser.friendRequests.includes(senderUsername)) currentUser.friendRequests.push(senderUsername);
+        updateUI();
+        showNotification('New Friend Request', `From ${senderUsername}`);
+    });
+    socket.on('request-accepted', (updatedUserData) => {
+        currentUser = updatedUserData;
+        updateUI();
+        showNotification('Friend Request Accepted', `${updatedUserData.friends.find(f => f !== currentUser.username)} is now your friend.`);
+    });
+    socket.on('friend-online', (username) => {
+        const indicator = document.querySelector(`.contact-item[data-username="${username}"] .status-indicator`);
+        if (indicator) indicator.classList.add('online');
+    });
+    socket.on('friend-offline', (username) => {
+        const indicator = document.querySelector(`.contact-item[data-username="${username}"] .status-indicator`);
+        if (indicator) indicator.classList.remove('online');
+    });
+    socket.on('new-status-posted', (status) => {
+        if (activeTab === 'status') renderStatus(status);
+    });
+    socket.on('status-deleted', (statusId) => {
+        const cardToRemove = document.querySelector(`.status-card[data-status-id="${statusId}"]`);
+        if (cardToRemove) cardToRemove.remove();
+    });
+
+    // --- 7. WebRTC Calling Logic (Corrected with Perfect Negotiation) ---
     function createPeerConnection(recipient) {
         peerConnection = new RTCPeerConnection(stunServers);
 
         peerConnection.ontrack = (event) => {
-            remoteVideo.srcObject = event.streams[0];
+            if (remoteVideo.srcObject !== event.streams[0]) {
+                remoteVideo.srcObject = event.streams[0];
+            }
         };
 
         peerConnection.onicecandidate = (event) => {
@@ -135,7 +303,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         };
 
-        // **FIX: Implement the Perfect Negotiation Pattern**
         peerConnection.onnegotiationneeded = async () => {
             try {
                 isMakingOffer = true;
@@ -158,7 +325,7 @@ document.addEventListener('DOMContentLoaded', () => {
             alert("Cannot start call. Check camera/microphone permissions.");
             return;
         }
-        isPolite = true; // The caller is designated as "polite"
+        isPolite = true;
         callModal.classList.remove('hidden');
         callStatus.textContent = `Calling ${recipient}...`;
         createPeerConnection(recipient);
@@ -167,14 +334,12 @@ document.addEventListener('DOMContentLoaded', () => {
     socket.on('call-made', async (data) => {
         try {
             const offer = data.offer;
-            // **FIX: Glare handling**
             const offerCollision = (isMakingOffer || peerConnection?.signalingState !== "stable");
             isIgnoringOffer = !isPolite && offerCollision;
             if (isIgnoringOffer) {
-                return; // The polite peer will retry, so the impolite one can ignore.
+                return;
             }
 
-            // Show incoming call notification
             incomingCallData = data;
             callerUsernameEl.textContent = data.sender;
             incomingCallToast.classList.remove('hidden');
@@ -212,7 +377,7 @@ document.addEventListener('DOMContentLoaded', () => {
         callModal.classList.remove('hidden');
         callStatus.textContent = `In call with ${incomingCallData.sender}`;
         
-        isPolite = false; // The receiver is impolite
+        isPolite = false;
         createPeerConnection(incomingCallData.sender);
         
         await peerConnection.setRemoteDescription(new RTCSessionDescription(incomingCallData.offer));
@@ -244,7 +409,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // In-call media toggles
     toggleAudioBtn.addEventListener('click', () => {
         const audioTrack = localStream.getAudioTracks()[0];
         if (audioTrack) {
@@ -295,5 +459,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         callModal.classList.add('hidden');
         remoteVideo.srcObject = null;
+        isPolite = false;
+        isMakingOffer = false;
+        isIgnoringOffer = false;
     });
 });
