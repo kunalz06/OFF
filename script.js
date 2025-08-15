@@ -71,14 +71,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function initializeMedia() {
         try {
-            // Get a default stream to show in the local video element, can be modified later
             localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
             localVideo.srcObject = localStream;
         } catch (error) { 
             console.error("Error accessing media devices.", error);
             alert("Camera/mic permissions are needed for calling. You can still use chat and status features.");
-            // Create a silent stream if permissions are denied, so the app doesn't crash
-            localStream = new MediaStream();
+            localStream = new MediaStream(); // Create a silent stream if permissions are denied
         }
     }
 
@@ -288,17 +286,34 @@ document.addEventListener('DOMContentLoaded', () => {
     function createPeerConnection(recipient) {
         peerConnection = new RTCPeerConnection(stunServers);
 
-        // **FIX**: Set up the ontrack event handler immediately.
+        // This event handler is fired when a track is added by the remote peer.
         peerConnection.ontrack = (event) => {
             remoteVideo.srcObject = event.streams[0];
         };
 
+        // This event handler is fired when the ICE agent needs to deliver a message to the other peer.
         peerConnection.onicecandidate = (event) => {
-            if (event.candidate) socket.emit('ice-candidate', { recipient, candidate: event.candidate });
+            if (event.candidate) {
+                socket.emit('ice-candidate', { recipient, candidate: event.candidate });
+            }
         };
 
+        // **FIX**: This event handler is the most reliable way to initiate the offer.
+        peerConnection.onnegotiationneeded = async () => {
+            try {
+                const offer = await peerConnection.createOffer();
+                await peerConnection.setLocalDescription(offer);
+                socket.emit('call-user', { recipient, offer: peerConnection.localDescription });
+            } catch (err) {
+                console.error("Error creating offer:", err);
+            }
+        };
+
+        // Add local tracks to the connection so they can be sent from the start.
         if (localStream) {
-            localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+            localStream.getTracks().forEach(track => {
+                peerConnection.addTrack(track, localStream);
+            });
         }
     }
 
@@ -309,10 +324,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         callModal.classList.remove('hidden');
         callStatus.textContent = `Calling ${recipient}...`;
-        createPeerConnection(recipient);
-        const offer = await peerConnection.createOffer();
-        await peerConnection.setLocalDescription(offer);
-        socket.emit('call-user', { recipient, offer });
+        createPeerConnection(recipient); // This will trigger onnegotiationneeded
     }
 
     socket.on('call-made', async (data) => {
@@ -334,38 +346,33 @@ document.addEventListener('DOMContentLoaded', () => {
     acceptCallBtn.addEventListener('click', async () => {
         const isAudioEnabled = preCallAudioBtn.classList.contains('active');
         const isVideoEnabled = preCallVideoBtn.classList.contains('active');
-        if (!isAudioEnabled && !isVideoEnabled) {
-            alert("You must enable audio or video to accept the call.");
+
+        if (!localStream) {
+            alert("Cannot accept call. Media stream not available.");
             return;
         }
-        try {
-            // Stop any existing tracks before getting new ones
-            if (localStream) {
-                localStream.getTracks().forEach(track => track.stop());
-            }
-            localStream = await navigator.mediaDevices.getUserMedia({ audio: isAudioEnabled, video: isVideoEnabled });
-            localVideo.srcObject = localStream;
 
-            // Sync in-call buttons with pre-call choices
-            toggleAudioBtn.classList.toggle('muted', !isAudioEnabled);
-            toggleAudioBtn.textContent = isAudioEnabled ? '🎤' : '🔇';
-            toggleVideoBtn.classList.toggle('off', !isVideoEnabled);
-            toggleVideoBtn.textContent = isVideoEnabled ? '📹' : '📸';
+        // **FIX**: Instead of creating a new stream, enable/disable tracks on the existing one.
+        localStream.getAudioTracks().forEach(track => track.enabled = isAudioEnabled);
+        localStream.getVideoTracks().forEach(track => track.enabled = isVideoEnabled);
+        localVideo.srcObject = localStream; // Re-assign to reflect changes if video was off
 
-            incomingCallToast.classList.add('hidden');
-            callModal.classList.remove('hidden');
-            callStatus.textContent = `In call with ${incomingCallData.sender}`;
-            
-            createPeerConnection(incomingCallData.sender);
-            await peerConnection.setRemoteDescription(new RTCSessionDescription(incomingCallData.offer));
-            const answer = await peerConnection.createAnswer();
-            await peerConnection.setLocalDescription(answer);
-            socket.emit('make-answer', { sender: incomingCallData.sender, answer });
-            incomingCallData = null;
-        } catch (error) {
-            console.error("Error getting media for call:", error);
-            alert("Could not start call. Check camera/microphone permissions.");
-        }
+        // Sync in-call buttons with pre-call choices
+        toggleAudioBtn.classList.toggle('muted', !isAudioEnabled);
+        toggleAudioBtn.textContent = isAudioEnabled ? '🎤' : '🔇';
+        toggleVideoBtn.classList.toggle('off', !isVideoEnabled);
+        toggleVideoBtn.textContent = isVideoEnabled ? '📹' : '📸';
+
+        incomingCallToast.classList.add('hidden');
+        callModal.classList.remove('hidden');
+        callStatus.textContent = `In call with ${incomingCallData.sender}`;
+        
+        createPeerConnection(incomingCallData.sender);
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(incomingCallData.offer));
+        const answer = await peerConnection.createAnswer();
+        await peerConnection.setLocalDescription(answer);
+        socket.emit('make-answer', { sender: incomingCallData.sender, answer });
+        incomingCallData = null;
     });
 
     rejectCallBtn.addEventListener('click', () => {
@@ -385,7 +392,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const audioTrack = localStream.getAudioTracks()[0];
         if (audioTrack) {
             audioTrack.enabled = !audioTrack.enabled;
-            toggleAudio-btn.classList.toggle('muted', !audioTrack.enabled);
+            toggleAudioBtn.classList.toggle('muted', !audioTrack.enabled);
             toggleAudioBtn.textContent = audioTrack.enabled ? '🎤' : '🔇';
         }
     });
@@ -403,7 +410,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (screenStream && screenStream.active) {
             const cameraTrack = localStream.getVideoTracks()[0];
             const sender = peerConnection.getSenders().find(s => s.track.kind === 'video');
-            if (sender) sender.replaceTrack(cameraTrack);
+            if (sender && cameraTrack) sender.replaceTrack(cameraTrack);
             screenStream.getTracks().forEach(track => track.stop());
             screenStream = null;
             screenShareBtn.style.backgroundColor = '#3498db';
@@ -416,7 +423,7 @@ document.addEventListener('DOMContentLoaded', () => {
             screenTrack.onended = () => {
                 if (peerConnection && peerConnection.connectionState === 'connected') {
                     const cameraTrack = localStream.getVideoTracks()[0];
-                    if (sender) sender.replaceTrack(cameraTrack);
+                    if (sender && cameraTrack) sender.replaceTrack(cameraTrack);
                     screenStream = null;
                     screenShareBtn.style.backgroundColor = '#3498db';
                 }
