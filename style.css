@@ -1,319 +1,49 @@
-:root {
-    --primary-color: #6a11cb;
-    --secondary-color: #2575fc;
-    --dark-bg: #121212;
-    --light-bg: #1e1e1e;
-    --text-color: #ffffff;
-    --card-color: rgba(0, 0, 0, 0.4);
-}
-
-body {
-    margin: 0;
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    color: var(--text-color);
-    overflow: hidden;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    height: 100vh;
-}
-
-.background-3d {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    z-index: -1;
-    background: linear-gradient(45deg, var(--primary-color), var(--secondary-color), #ff0077, #ffde00);
-    background-size: 400% 400%;
-    animation: moveGradient 15s ease infinite;
-}
-
-@keyframes moveGradient {
-    0% { background-position: 0% 50%; }
-    50% { background-position: 100% 50%; }
-    100% { background-position: 0% 50%; }
-}
-
-.app-container {
-    width: 90%;
-    max-width: 1200px;
-    height: 90vh;
-    background: var(--card-color);
-    backdrop-filter: blur(15px);
-    border-radius: 20px;
-    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
-    border: 1px solid rgba(255, 255, 255, 0.18);
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    padding: 20px;
-}
-
-/* Card Styling */
-.card {
-    text-align: center;
-    padding: 40px;
-}
-.card h2 {
-    font-size: 2.5rem;
-    margin-bottom: 10px;
-}
-input[type="text"] {
-    padding: 12px;
-    width: 80%;
-    border-radius: 8px;
-    border: 1px solid #ccc;
-    margin-top: 20px;
-    background: #2a2a2a;
-    color: white;
-    font-size: 1rem;
-}
-button {
-    padding: 12px 25px;
-    border: none;
-    background-color: var(--primary-color);
-    color: white;
-    border-radius: 8px;
-    cursor: pointer;
-    font-size: 1rem;
-    margin-top: 20px;
-    transition: background-color 0.3s ease;
-}
-button:hover {
-    background-color: var(--secondary-color);
-}
-
-/* Main App Layout */
-#main-app {
-    display: flex;
-    width: 100%;
-    height: 100%;
-    gap: 20px;
-}
-.hidden { display: none !important; }
-
-#chat-container {
-    flex: 2;
-    display: flex;
-    flex-direction: column;
-    background: rgba(0,0,0,0.2);
-    border-radius: 15px;
-    overflow: hidden;
-}
-#messages {
-    flex-grow: 1;
-    padding: 20px;
-    overflow-y: auto;
-}
-.message { margin-bottom: 15px; }
-.message strong { color: var(--secondary-color); }
-.input-area { display: flex; padding: 10px; }
-#message-input { flex-grow: 1; margin: 0 10px 0 0; }
-#send-btn { margin-top: 0; }
-
-
-#video-container {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-    align-items: center;
-    background: rgba(0,0,0,0.2);
-    border-radius: 15px;
-    padding: 10px;
-}
-video {
-    width: 100%;
-    border-radius: 10px;
-    background: #000;
-}
-#local-video { margin-bottom: 10px; }
-.call-controls #call-btn {
-    width: 60px;
-    height: 60px;
-    border-radius: 50%;
-    font-size: 2rem;
-    line-height: 0;
-}
-/* Add these new styles to your existing style.css, keeping the background and root variables */
-
-/* Main App Layout */
-#main-app {
-    flex-direction: row;
-    align-items: stretch;
-    padding: 0;
-    overflow: hidden;
-}
-
-#sidebar {
-    width: 30%;
-    max-width: 300px;
-    background: rgba(0,0,0,0.2);
-    display: flex;
-    flex-direction: column;
-    border-right: 1px solid rgba(255, 255, 255, 0.1);
-}
-.sidebar-header {
-    padding: 20px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-}
-#user-list {
-    flex-grow: 1;
-    overflow-y: auto;
-}
-.user-item {
-    padding: 15px 20px;
-    cursor: pointer;
-    transition: background 0.2s;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-}
-.user-item:hover {
-    background: rgba(255, 255, 255, 0.1);
-}
-.sidebar-footer {
-    padding: 15px;
-    text-align: center;
-}
-
-#main-content {
-    flex-grow: 1;
-    display: flex;
-    flex-direction: column;
-}
-#welcome-screen {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    height: 100%;
-}
-#chat-window, #status-window {
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-}
-
-/* Chat Window */
-#chat-header {
-    padding: 15px 20px;
-    background: rgba(0,0,0,0.3);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-size: 1.2rem;
-}
-#messages {
-    flex-grow: 1;
-    padding: 20px;
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-}
-.message-bubble {
-    padding: 10px 15px;
-    border-radius: 20px;
-    max-width: 70%;
-    margin-bottom: 10px;
-    word-wrap: break-word;
-}
-.sent {
-    background-color: var(--primary-color);
-    align-self: flex-end;
-}
-.received {
-    background-color: #333;
-    align-self: flex-start;
-}
-.input-area {
-    padding: 15px;
-    display: flex;
-    background: rgba(0,0,0,0.3);
-}
-
-/* Status Window */
-#statuses-feed {
-    padding: 20px;
-    overflow-y: auto;
-}
-.status-post {
-    background: #2a2a2a;
-    padding: 15px;
-    border-radius: 8px;
-    margin-bottom: 15px;
-}
-.status-post strong { color: var(--secondary-color); }
-.status-post p { margin: 5px 0 0; }
-
-/* Call Modal */
-#call-modal {
-    position: fixed;
-    top: 0; left: 0;
-    width: 100%; height: 100%;
-    background: rgba(0,0,0,0.8);
-    backdrop-filter: blur(10px);
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
-    z-index: 100;
-}
-#call-modal .video-container {
-    display: flex;
-    gap: 20px;
-    width: 80%;
-}
-#call-modal video {
-    width: 50%;
-    border-radius: 10px;
-    background: #000;
-}
-#call-modal .call-controls {
-    margin-top: 20px;
-}
-#end-call-btn { background-color: #e74c3c; }
-#screen-share-btn { background-color: #3498db; }
-
 /* --- Core Variables & Global Styles --- */
 :root {
-    --primary-color: #6a11cb;
-    --secondary-color: #2575fc;
+    --primary-color: #B00020; /* A strong red for accents */
+    --secondary-color: #CF6679; /* A softer red for hover states */
     --dark-bg: #121212;
-    --light-bg: #1e1e1e;
-    --text-color: #ffffff;
-    --card-color: rgba(0, 0, 0, 0.4);
-    --success-color: #2ecc71;
-    --error-color: #e74c3c;
+    --light-bg: #1E1E1E;
+    --text-color: #E1E1E1;
+    --card-color: rgba(30, 30, 30, 0.6);
+    --success-color: #4CAF50;
+    --error-color: #D32F2F;
+    --line-color-1: rgba(255, 255, 255, 0.05);
+    --line-color-2: rgba(176, 0, 32, 0.2); /* Red line color */
 }
 
 body {
     margin: 0;
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Roboto', 'Oxygen', 'Ubuntu', sans-serif;
     color: var(--text-color);
     overflow: hidden;
     display: flex;
     justify-content: center;
     align-items: center;
     height: 100vh;
+    background-color: var(--dark-bg);
 }
 
 /* --- Animated Background --- */
-.background-3d {
+.background-lines {
     position: fixed;
     top: 0;
     left: 0;
     width: 100%;
     height: 100%;
     z-index: -1;
-    background: linear-gradient(45deg, var(--primary-color), var(--secondary-color), #ff0077, #ffde00);
-    background-size: 400% 400%;
-    animation: moveGradient 15s ease infinite;
+    background-image: 
+        linear-gradient(var(--line-color-1) 1px, transparent 1px),
+        linear-gradient(90deg, var(--line-color-1) 1px, transparent 1px),
+        linear-gradient(var(--line-color-2) 1px, transparent 1px),
+        linear-gradient(90deg, var(--line-color-2) 1px, transparent 1px);
+    background-size: 40px 40px, 40px 40px, 120px 120px, 120px 120px;
+    animation: moveLines 25s linear infinite;
 }
 
-@keyframes moveGradient {
-    0% { background-position: 0% 50%; }
-    50% { background-position: 100% 50%; }
-    100% { background-position: 0% 50%; }
+@keyframes moveLines {
+    0% { background-position: 0 0; }
+    100% { background-position: 240px 240px; }
 }
 
 /* --- Main Containers & Cards --- */
@@ -322,10 +52,10 @@ body {
     max-width: 1200px;
     height: 90vh;
     background: var(--card-color);
-    backdrop-filter: blur(15px);
-    border-radius: 20px;
+    backdrop-filter: blur(10px);
+    border-radius: 16px;
     box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
-    border: 1px solid rgba(255, 255, 255, 0.18);
+    border: 1px solid rgba(255, 255, 255, 0.1);
     display: flex;
     justify-content: center;
     align-items: center;
@@ -337,8 +67,27 @@ body {
 .hidden { display: none !important; }
 
 /* --- Forms & Buttons --- */
-input[type="text"] { padding: 12px; width: 80%; border-radius: 8px; border: 1px solid #ccc; margin-top: 20px; background: #2a2a2a; color: white; font-size: 1rem; }
-button { padding: 12px 25px; border: none; background-color: var(--primary-color); color: white; border-radius: 8px; cursor: pointer; font-size: 1rem; margin-top: 20px; transition: background-color 0.3s ease; }
+input[type="text"] { 
+    padding: 12px; 
+    width: 80%; 
+    border-radius: 8px; 
+    border: 1px solid #333; 
+    margin-top: 20px; 
+    background: #2a2a2a; 
+    color: var(--text-color); 
+    font-size: 1rem;
+}
+button { 
+    padding: 12px 25px; 
+    border: none; 
+    background-color: var(--primary-color); 
+    color: white; 
+    border-radius: 8px; 
+    cursor: pointer; 
+    font-size: 1rem; 
+    margin-top: 20px; 
+    transition: background-color 0.3s ease; 
+}
 button:hover { background-color: var(--secondary-color); }
 
 /* --- App Layout (Sidebar & Main Content) --- */
@@ -347,17 +96,17 @@ button:hover { background-color: var(--secondary-color); }
 #main-content { flex-grow: 1; display: flex; flex-direction: column; }
 
 /* --- Tabs & Navigation --- */
-.tab-nav { display: flex; justify-content: space-around; padding: 10px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.1); }
+.tab-nav { display: grid; grid-template-columns: repeat(4, 1fr); padding: 10px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.1); }
 .tab-link { background: none; margin: 0; padding: 10px; font-size: 1rem; color: #aaa; border-radius: 0; border-bottom: 2px solid transparent; }
 .tab-link.active { color: white; border-bottom: 2px solid var(--primary-color); }
 .tab-content { padding: 20px; height: 100%; overflow-y: auto; box-sizing: border-box; }
-.tab-content.active { display: block; } /* Use display block/none for active tabs */
+.tab-content.active { display: block; }
 
 /* --- Contact List --- */
 #contact-list { flex-grow: 1; overflow-y: auto; }
 .contact-item { padding: 15px 20px; cursor: pointer; transition: background 0.2s; border-bottom: 1px solid rgba(255, 255, 255, 0.05); display: flex; align-items: center; justify-content: space-between; }
 .contact-item:hover { background: rgba(255, 255, 255, 0.1); }
-.status-indicator { width: 10px; height: 10px; border-radius: 50%; background-color: #ccc; /* Grey for offline */ }
+.status-indicator { width: 10px; height: 10px; border-radius: 50%; background-color: #555; }
 .status-indicator.online { background-color: var(--success-color); }
 
 /* --- Profile Tab --- */
@@ -377,61 +126,14 @@ button:hover { background-color: var(--secondary-color); }
 .received { background-color: #333; align-self: flex-start; }
 .input-area { padding: 15px; display: flex; background: rgba(0,0,0,0.3); }
 
-/* --- Call Modal & Toast Notification --- */
-#call-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); backdrop-filter: blur(10px); display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 100; }
-#call-modal .video-container { display: flex; gap: 20px; width: 80%; }
-#call-modal video { width: 50%; border-radius: 10px; background: #000; }
-#call-modal .call-controls { margin-top: 20px; }
-#end-call-btn { background-color: var(--error-color); }
-#screen-share-btn { background-color: #3498db; }
-
-#incoming-call-toast { position: fixed; top: 20px; right: 20px; background: var(--light-bg); padding: 20px; border-radius: 10px; box-shadow: 0 5px 15px rgba(0,0,0,0.5); z-index: 101; }
-#incoming-call-toast button { margin: 0 5px; }
-#accept-call-btn { background-color: var(--success-color); }
-#reject-call-btn { background-color: var(--error-color); }
-
-/* --- Core Variables & Global Styles --- */
-:root {
-    /* ... (Unchanged) ... */
-    --line-color-1: rgba(255, 255, 255, 0.1);
-    --line-color-2: rgba(255, 0, 0, 0.2);
-}
-
-/* ... (body, .app-container, .card, etc. are unchanged) ... */
-
-/* --- NEW Subtle Black & White Background --- */
-.background-lines {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    z-index: -1;
-    background-color: #0a0a0a;
-    background-image: 
-        linear-gradient(var(--line-color-1) 1px, transparent 1px),
-        linear-gradient(90deg, var(--line-color-1) 1px, transparent 1px),
-        linear-gradient(var(--line-color-2) 1px, transparent 1px),
-        linear-gradient(90deg, var(--line-color-2) 1px, transparent 1px);
-    background-size: 50px 50px, 50px 50px, 150px 150px, 150px 150px;
-    animation: moveLines 20s linear infinite;
-}
-
-@keyframes moveLines {
-    0% { background-position: 0 0; }
-    100% { background-position: 150px 150px; }
-}
-
-/* --- Tabs & Navigation --- */
-/* Add Status to the nav grid */
-.tab-nav { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; /* 4 tabs */ }
-
-/* --- Status Tab Styles --- */
+/* --- Status Tab --- */
 #statuses-feed {
     margin-top: 20px;
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
     gap: 15px;
+    overflow-y: auto;
+    max-height: calc(90vh - 150px); /* Adjust based on your layout */
 }
 .status-card {
     border-radius: 8px;
@@ -452,102 +154,27 @@ button:hover { background-color: var(--secondary-color); }
     overflow: hidden;
     text-overflow: ellipsis;
 }
-
-/* --- File Input Styling --- */
 .file-input-label {
     background-color: var(--primary-color);
-    color: white;
     padding: 10px 15px;
     border-radius: 5px;
     cursor: pointer;
     display: inline-block;
 }
-#status-image-input {
-    display: none;
-}
-
-/* --- Call Control Buttons --- */
-#toggle-audio-btn, #toggle-video-btn {
-    background-color: var(--success-color);
-}
-#toggle-audio-btn.muted, #toggle-video-btn.off {
-    background-color: var(--error-color);
-}
-
-/* ... (All other previous styles remain the same) ... */
-:root {
-    --primary-color: #6a11cb;
-    --secondary-color: #2575fc;
-    --dark-bg: #121212;
-    --light-bg: #1e1e1e;
-    --text-color: #ffffff;
-    --card-color: rgba(0, 0, 0, 0.4);
-    --success-color: #2ecc71;
-    --error-color: #e74c3c;
-    --line-color-1: rgba(255, 255, 255, 0.05);
-    --line-color-2: rgba(255, 0, 0, 0.15);
-}
-
-body {
-    margin: 0;
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    color: var(--text-color);
-    overflow: hidden;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    height: 100vh;
-    background-color: #0a0a0a;
-}
-
-.background-lines {
-    position: fixed;
-    top: 0; left: 0; width: 100%; height: 100%; z-index: -1;
-    background-image: 
-        linear-gradient(var(--line-color-1) 1px, transparent 1px),
-        linear-gradient(90deg, var(--line-color-1) 1px, transparent 1px),
-        linear-gradient(var(--line-color-2) 1px, transparent 1px),
-        linear-gradient(90deg, var(--line-color-2) 1px, transparent 1px);
-    background-size: 50px 50px, 50px 50px, 125px 125px, 125px 125px;
-    animation: moveLines 20s linear infinite;
-}
-
-@keyframes moveLines {
-    0% { background-position: 0 0; }
-    100% { background-position: 250px 250px; }
-}
-
-.app-container { /* ... (Unchanged) ... */ }
-.card { /* ... (Unchanged) ... */ }
-input[type="text"] { /* ... (Unchanged) ... */ }
-button { /* ... (Unchanged) ... */ }
-
-.tab-nav { display: grid; grid-template-columns: repeat(4, 1fr); }
-.tab-link { /* ... (Unchanged) ... */ }
-
-#statuses-feed {
-    margin-top: 20px;
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-    gap: 15px;
-    overflow-y: auto;
-    max-height: calc(90vh - 150px);
-}
-.status-card {
-    border-radius: 8px; overflow: hidden; background: #1a1a1a; padding: 8px;
-}
-.status-card img {
-    width: 100%; height: 200px; object-fit: cover; border-radius: 4px;
-}
-.status-card p {
-    margin: 8px 0 0; font-size: 0.9rem;
-}
-.file-input-label {
-    background-color: var(--primary-color); padding: 10px 15px; border-radius: 5px; cursor: pointer; display: inline-block;
-}
 #status-image-input { display: none; }
 
-#toggle-audio-btn, #toggle-video-btn { background-color: var(--secondary-color); }
-#toggle-audio-btn.muted, #toggle-video-btn.off { background-color: var(--error-color); }
+/* --- Call Modal & Toast --- */
+#call-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); backdrop-filter: blur(10px); display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 100; }
+#call-modal .video-container { display: flex; gap: 20px; width: 80%; max-width: 1000px; }
+#call-modal video { width: 50%; border-radius: 10px; background: #000; }
+#call-modal .call-controls { margin-top: 20px; display: flex; gap: 15px; }
+#call-modal .call-controls button { margin: 0; }
+#end-call-btn { background-color: var(--error-color); }
+#screen-share-btn { background-color: #3498db; }
+#toggle-audio-btn, #toggle-video-btn { background-color: #444; }
+#toggle-audio-btn.muted, #toggle-video-btn.off { background-color: var(--primary-color); }
 
-/* ... (All other previous styles for chat, profile, etc. remain the same) ... */
+#incoming-call-toast { position: fixed; top: 20px; right: 20px; background: var(--light-bg); padding: 20px; border-radius: 10px; box-shadow: 0 5px 15px rgba(0,0,0,0.5); z-index: 101; }
+#incoming-call-toast button { margin: 0 5px; }
+#accept-call-btn { background-color: var(--success-color); }
+#reject-call-btn { background-color: var(--error-color); }
