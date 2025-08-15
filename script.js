@@ -205,7 +205,7 @@ document.addEventListener('DOMContentLoaded', () => {
     socket.on('request-accepted', (updatedUserData) => {
         currentUser = updatedUserData;
         updateUI();
-        alert(`${updatedUserData.username} accepted your friend request!`);
+        alert(`${updatedUserData.friends.find(f => f !== currentUser.username)} accepted your friend request!`);
     });
     socket.on('friend-online', (username) => {
         const indicator = document.querySelector(`.contact-item[data-username="${username}"] .status-indicator`);
@@ -222,12 +222,28 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- 6. WebRTC Calling Logic ---
     function createPeerConnection(recipient) {
         peerConnection = new RTCPeerConnection(stunServers);
-        peerConnection.onicecandidate = (event) => {
-            if (event.candidate) socket.emit('ice-candidate', { recipient, candidate: event.candidate });
+
+        // ** THE FIX IS HERE **
+        // This event handler is now set up immediately, ensuring it's ready to receive the track.
+        peerConnection.ontrack = (event) => {
+            console.log("Received remote track!");
+            remoteVideo.srcObject = event.streams[0];
         };
-        peerConnection.ontrack = (event) => { remoteVideo.srcObject = event.streams[0]; };
-        localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+        
+        peerConnection.onicecandidate = (event) => {
+            if (event.candidate) {
+                socket.emit('ice-candidate', { recipient, candidate: event.candidate });
+            }
+        };
+
+        // Add local tracks to the connection so they can be sent
+        if (localStream) {
+            localStream.getTracks().forEach(track => {
+                peerConnection.addTrack(track, localStream);
+            });
+        }
     }
+
     async function startCall(recipient) {
         callModal.classList.remove('hidden');
         callStatus.textContent = `Calling ${recipient}...`;
@@ -236,11 +252,13 @@ document.addEventListener('DOMContentLoaded', () => {
         await peerConnection.setLocalDescription(offer);
         socket.emit('call-user', { recipient, offer });
     }
+
     socket.on('call-made', async (data) => {
         incomingCallData = data;
         callerUsernameEl.textContent = data.sender;
         incomingCallToast.classList.remove('hidden');
     });
+
     acceptCallBtn.addEventListener('click', async () => {
         incomingCallToast.classList.add('hidden');
         callModal.classList.remove('hidden');
@@ -252,16 +270,24 @@ document.addEventListener('DOMContentLoaded', () => {
         socket.emit('make-answer', { sender: incomingCallData.sender, answer });
         incomingCallData = null;
     });
+
     rejectCallBtn.addEventListener('click', () => {
         incomingCallToast.classList.add('hidden');
         incomingCallData = null;
     });
+
     socket.on('answer-made', async (data) => {
-        await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+        if (peerConnection) {
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+        }
     });
+
     socket.on('ice-candidate', (data) => {
-        if (peerConnection) peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+        if (peerConnection) {
+            peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+        }
     });
+
     toggleAudioBtn.addEventListener('click', () => {
         const audioTrack = localStream.getAudioTracks()[0];
         if (audioTrack) {
@@ -270,6 +296,7 @@ document.addEventListener('DOMContentLoaded', () => {
             toggleAudioBtn.textContent = audioTrack.enabled ? '🎤' : '🔇';
         }
     });
+
     toggleVideoBtn.addEventListener('click', () => {
         const videoTrack = localStream.getVideoTracks()[0];
         if (videoTrack) {
@@ -278,11 +305,14 @@ document.addEventListener('DOMContentLoaded', () => {
             toggleVideoBtn.textContent = videoTrack.enabled ? '📹' : '📸';
         }
     });
+
     screenShareBtn.addEventListener('click', async () => {
         if (screenStream && screenStream.active) {
             const cameraTrack = localStream.getVideoTracks()[0];
             const sender = peerConnection.getSenders().find(s => s.track.kind === 'video');
-            sender.replaceTrack(cameraTrack);
+            if (sender) {
+                sender.replaceTrack(cameraTrack);
+            }
             screenStream.getTracks().forEach(track => track.stop());
             screenStream = null;
             screenShareBtn.style.backgroundColor = '#3498db';
@@ -290,18 +320,23 @@ document.addEventListener('DOMContentLoaded', () => {
             screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
             const screenTrack = screenStream.getVideoTracks()[0];
             const sender = peerConnection.getSenders().find(s => s.track.kind === 'video');
-            sender.replaceTrack(screenTrack);
+            if (sender) {
+                sender.replaceTrack(screenTrack);
+            }
             screenShareBtn.style.backgroundColor = 'var(--error-color)';
             screenTrack.onended = () => {
-                if (peerConnection.connectionState === 'connected') {
+                if (peerConnection && peerConnection.connectionState === 'connected') {
                     const cameraTrack = localStream.getVideoTracks()[0];
-                    sender.replaceTrack(cameraTrack);
+                    if (sender) {
+                       sender.replaceTrack(cameraTrack);
+                    }
                     screenStream = null;
                     screenShareBtn.style.backgroundColor = '#3498db';
                 }
             };
         }
     });
+
     endCallBtn.addEventListener('click', () => {
         if (peerConnection) {
             peerConnection.close();
