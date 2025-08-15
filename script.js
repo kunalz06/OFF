@@ -9,6 +9,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let localStream;
     let screenStream;
     let incomingCallData = null;
+    let iceCandidateQueue = []; // **FIX: Queue for early ICE candidates**
 
     // --- DOM Elements ---
     const loginScreen = document.getElementById('login-screen');
@@ -76,7 +77,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (error) { 
             console.error("Error accessing media devices.", error);
             alert("Camera/mic permissions are needed for calling. You can still use chat and status features.");
-            localStream = new MediaStream(); // Create a silent stream if permissions are denied
+            localStream = new MediaStream();
         }
     }
 
@@ -284,36 +285,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- 7. WebRTC Calling Logic (Corrected and Final) ---
     function createPeerConnection(recipient) {
+        iceCandidateQueue = []; // Reset the queue for each new call
         peerConnection = new RTCPeerConnection(stunServers);
 
-        // This event handler is fired when a track is added by the remote peer.
         peerConnection.ontrack = (event) => {
             remoteVideo.srcObject = event.streams[0];
         };
 
-        // This event handler is fired when the ICE agent needs to deliver a message to the other peer.
         peerConnection.onicecandidate = (event) => {
             if (event.candidate) {
                 socket.emit('ice-candidate', { recipient, candidate: event.candidate });
             }
         };
 
-        // **FIX**: This event handler is the most reliable way to initiate the offer.
-        peerConnection.onnegotiationneeded = async () => {
-            try {
-                const offer = await peerConnection.createOffer();
-                await peerConnection.setLocalDescription(offer);
-                socket.emit('call-user', { recipient, offer: peerConnection.localDescription });
-            } catch (err) {
-                console.error("Error creating offer:", err);
-            }
-        };
-
-        // Add local tracks to the connection so they can be sent from the start.
         if (localStream) {
-            localStream.getTracks().forEach(track => {
-                peerConnection.addTrack(track, localStream);
-            });
+            localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
         }
     }
 
@@ -324,7 +310,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         callModal.classList.remove('hidden');
         callStatus.textContent = `Calling ${recipient}...`;
-        createPeerConnection(recipient); // This will trigger onnegotiationneeded
+        createPeerConnection(recipient);
+        const offer = await peerConnection.createOffer();
+        await peerConnection.setLocalDescription(offer);
+        socket.emit('call-user', { recipient, offer: peerConnection.localDescription });
     }
 
     socket.on('call-made', async (data) => {
@@ -347,17 +336,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const isAudioEnabled = preCallAudioBtn.classList.contains('active');
         const isVideoEnabled = preCallVideoBtn.classList.contains('active');
 
-        if (!localStream) {
-            alert("Cannot accept call. Media stream not available.");
-            return;
+        if (localStream) {
+            localStream.getAudioTracks().forEach(track => track.enabled = isAudioEnabled);
+            localStream.getVideoTracks().forEach(track => track.enabled = isVideoEnabled);
         }
-
-        // **FIX**: Instead of creating a new stream, enable/disable tracks on the existing one.
-        localStream.getAudioTracks().forEach(track => track.enabled = isAudioEnabled);
-        localStream.getVideoTracks().forEach(track => track.enabled = isVideoEnabled);
-        localVideo.srcObject = localStream; // Re-assign to reflect changes if video was off
-
-        // Sync in-call buttons with pre-call choices
+        
         toggleAudioBtn.classList.toggle('muted', !isAudioEnabled);
         toggleAudioBtn.textContent = isAudioEnabled ? '🎤' : '🔇';
         toggleVideoBtn.classList.toggle('off', !isVideoEnabled);
@@ -368,7 +351,12 @@ document.addEventListener('DOMContentLoaded', () => {
         callStatus.textContent = `In call with ${incomingCallData.sender}`;
         
         createPeerConnection(incomingCallData.sender);
+        
+        // **FIX**: Process the queued candidates *after* setting the remote description.
         await peerConnection.setRemoteDescription(new RTCSessionDescription(incomingCallData.offer));
+        iceCandidateQueue.forEach(candidate => peerConnection.addIceCandidate(candidate));
+        iceCandidateQueue = []; // Clear the queue
+
         const answer = await peerConnection.createAnswer();
         await peerConnection.setLocalDescription(answer);
         socket.emit('make-answer', { sender: incomingCallData.sender, answer });
@@ -381,11 +369,22 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     socket.on('answer-made', async (data) => {
-        if (peerConnection) await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+        if (peerConnection) {
+            // **FIX**: Process the queued candidates *after* setting the remote description.
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+            iceCandidateQueue.forEach(candidate => peerConnection.addIceCandidate(candidate));
+            iceCandidateQueue = []; // Clear the queue
+        }
     });
 
     socket.on('ice-candidate', (data) => {
-        if (peerConnection) peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+        const candidate = new RTCIceCandidate(data.candidate);
+        // **FIX**: If the peer connection isn't ready, queue the candidate. Otherwise, add it directly.
+        if (peerConnection && peerConnection.remoteDescription) {
+            peerConnection.addIceCandidate(candidate);
+        } else {
+            iceCandidateQueue.push(candidate);
+        }
     });
 
     toggleAudioBtn.addEventListener('click', () => {
