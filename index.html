@@ -3,36 +3,65 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OFF - Chat & Call</title>
+    <title>OFF v2</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <div class="background-3d"></div>
-    <div class="app-container">
-        <div id="login-screen" class="card">
-            <h2>Welcome to OFF</h2>
-            <p>Enter a username to begin</p>
-            <input type="text" id="username-input" placeholder="Your Username">
-            <button id="join-btn">Join Chat</button>
-        </div>
 
-        <div id="main-app" class="hidden">
-            <div id="chat-container">
+    <div id="login-screen" class="app-container">
+        <div class="card">
+            <h2>OFF</h2>
+            <p>Enter your username to go off-grid.</p>
+            <input type="text" id="username-input" placeholder="Your Username">
+            <button id="join-btn">Join</button>
+        </div>
+    </div>
+
+    <div id="main-app" class="app-container hidden">
+        <aside id="sidebar">
+            <div class="sidebar-header">
+                <h3>Contacts</h3>
+            </div>
+            <div id="user-list"></div>
+            <div class="sidebar-footer">
+                <button id="status-btn">Status</button>
+            </div>
+        </aside>
+        <main id="main-content">
+            <div id="welcome-screen">
+                <h2>Select a chat to begin</h2>
+            </div>
+            <div id="chat-window" class="hidden">
+                <div id="chat-header"></div>
                 <div id="messages"></div>
                 <div class="input-area">
                     <input type="text" id="message-input" placeholder="Type a message...">
                     <button id="send-btn">Send</button>
                 </div>
             </div>
-            <div id="video-container">
-                <video id="local-video" autoplay muted></video>
-                <video id="remote-video" autoplay></video>
-                <div class="call-controls">
-                    <button id="call-btn">📞 Call</button>
+            <div id="status-window" class="hidden">
+                <h3>Recent Statuses</h3>
+                <div class="status-input-area">
+                    <input type="text" id="status-input" placeholder="What's on your mind?">
+                    <button id="post-status-btn">Post</button>
                 </div>
+                <div id="statuses-feed"></div>
             </div>
+        </main>
+    </div>
+
+    <div id="call-modal" class="hidden">
+        <div class="video-container">
+            <video id="local-video" autoplay muted></video>
+            <video id="remote-video" autoplay></video>
+        </div>
+        <div class="call-controls">
+            <button id="screen-share-btn">🖥️</button>
+            <button id="end-call-btn">End Call</button>
         </div>
     </div>
+
     <script src="/socket.io/socket.io.js"></script>
     <script src="script.js"></script>
 </body>
