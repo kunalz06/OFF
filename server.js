@@ -32,14 +32,13 @@ async function connectMongo() {
     try {
         await client.connect();
         console.log("MongoDB connected successfully!");
-        const db = client.db("off_chat_app_v6"); // New DB version for this feature set
+        const db = client.db("off_chat_app_v7"); // New DB version
         usersCollection = db.collection("users");
         statusesCollection = db.collection("statuses");
-        messagesCollection = db.collection("messages"); // Collection for persistent messages
+        messagesCollection = db.collection("messages");
         
         await usersCollection.createIndex({ username: 1 }, { unique: true });
         
-        // Use the corrected, idempotent method for creating the TTL index
         await statusesCollection.createIndex(
             { "timestamp": 1 },
             { expireAfterSeconds: 43200 } // 12 hours
@@ -183,6 +182,13 @@ io.on('connection', (socket) => {
     });
     socket.on('ice-candidate', (data) => {
         if (onlineUsers[data.recipient]) io.to(onlineUsers[data.recipient]).emit('ice-candidate', { candidate: data.candidate, sender: socket.username });
+    });
+    // **NEW: Handle call rejection**
+    socket.on('reject-call', (data) => {
+        const callerSocketId = onlineUsers[data.caller];
+        if (callerSocketId) {
+            io.to(callerSocketId).emit('call-rejected', { reason: `${data.recipient} is busy on another call.` });
+        }
     });
 
     // 6. Status Feature Logic

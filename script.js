@@ -9,11 +9,10 @@ document.addEventListener('DOMContentLoaded', () => {
     let localStream;
     let screenStream;
     let incomingCallData = null;
-    
-    // **FIX: Perfect Negotiation State Variables**
+    let isPolite = false;
     let isMakingOffer = false;
     let isIgnoringOffer = false;
-    let isPolite = false;
+    let isBusy = false; // State to track if user is in a call or has a notification
 
     // --- DOM Elements ---
     const loginScreen = document.getElementById('login-screen');
@@ -98,7 +97,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // --- 3. UI Management ---
+    // --- 3. UI, Status, Friend, and Chat Logic (Complete) ---
     function updateUI() {
         profileUsername.textContent = `Welcome, ${currentUser.username}`;
         friendRequestsList.innerHTML = '';
@@ -142,7 +141,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    // --- 4. Status Feature Logic ---
     statusImageInput.addEventListener('change', (e) => {
         const file = e.target.files[0];
         if (!file) return;
@@ -202,7 +200,6 @@ document.addEventListener('DOMContentLoaded', () => {
         viewerImage.src = '';
     });
 
-    // --- 5. Friend & Chat Logic ---
     sendRequestBtn.addEventListener('click', () => {
         const recipientUsername = addUsernameInput.value.trim();
         if (recipientUsername) {
@@ -252,7 +249,7 @@ document.addEventListener('DOMContentLoaded', () => {
     sendBtn.addEventListener('click', sendMessage);
     messageInput.addEventListener('keypress', (e) => (e.key === 'Enter') && sendMessage());
 
-    // --- 6. Real-time Socket Event Handlers ---
+    // --- 4. Real-time Socket Event Handlers ---
     socket.on('private-message', (msg) => {
         if (msg.sender === activeChat || msg.sender === currentUser.username) {
             renderMessage(msg);
@@ -287,7 +284,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (cardToRemove) cardToRemove.remove();
     });
 
-    // --- 7. WebRTC Calling Logic (Corrected with Perfect Negotiation) ---
+    // --- 5. WebRTC Calling Logic (with Busy State and Perfect Negotiation) ---
     function createPeerConnection(recipient) {
         peerConnection = new RTCPeerConnection(stunServers);
 
@@ -326,28 +323,31 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         isPolite = true;
+        isBusy = true; // Set busy when initiating a call
         callModal.classList.remove('hidden');
         callStatus.textContent = `Calling ${recipient}...`;
         createPeerConnection(recipient);
     }
 
     socket.on('call-made', async (data) => {
-        try {
-            const offer = data.offer;
-            const offerCollision = (isMakingOffer || peerConnection?.signalingState !== "stable");
-            isIgnoringOffer = !isPolite && offerCollision;
-            if (isIgnoringOffer) {
-                return;
-            }
-
-            incomingCallData = data;
-            callerUsernameEl.textContent = data.sender;
-            incomingCallToast.classList.remove('hidden');
-            showNotification(`Incoming call from ${data.sender}`, 'Click to answer.');
-
-        } catch (err) {
-            console.error("Error handling incoming call:", err);
+        if (isBusy) {
+            socket.emit('reject-call', { recipient: currentUser.username, caller: data.sender });
+            return;
         }
+        
+        isBusy = true;
+        const offer = data.offer;
+        const offerCollision = (isMakingOffer || peerConnection?.signalingState !== "stable");
+        isIgnoringOffer = !isPolite && offerCollision;
+        if (isIgnoringOffer) {
+            isBusy = false;
+            return;
+        }
+
+        incomingCallData = data;
+        callerUsernameEl.textContent = data.sender;
+        incomingCallToast.classList.remove('hidden');
+        showNotification(`Incoming call from ${data.sender}`, 'Click to answer.');
     });
 
     preCallAudioBtn.addEventListener('click', () => {
@@ -388,7 +388,9 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     rejectCallBtn.addEventListener('click', () => {
+        isBusy = false;
         incomingCallToast.classList.add('hidden');
+        socket.emit('reject-call', { recipient: currentUser.username, caller: incomingCallData.sender });
         incomingCallData = null;
     });
 
@@ -407,6 +409,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 });
         }
+    });
+
+    socket.on('call-rejected', (data) => {
+        alert(data.reason || `${data.recipient} rejected the call.`);
+        endCall();
     });
 
     toggleAudioBtn.addEventListener('click', () => {
@@ -452,15 +459,18 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    endCallBtn.addEventListener('click', () => {
+    function endCall() {
         if (peerConnection) {
             peerConnection.close();
             peerConnection = null;
         }
-        callModal.classList.add('hidden');
-        remoteVideo.srcObject = null;
+        isBusy = false;
         isPolite = false;
         isMakingOffer = false;
         isIgnoringOffer = false;
-    });
+        callModal.classList.add('hidden');
+        remoteVideo.srcObject = null;
+    }
+    
+    endCallBtn.addEventListener('click', endCall);
 });
