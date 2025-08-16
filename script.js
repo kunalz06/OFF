@@ -445,11 +445,7 @@ document.addEventListener('DOMContentLoaded', () => {
             localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
         }
         
-        if (isGroup) {
-            groupCallPeerConnections[targetUserId] = pc;
-        } else {
-            directCallPeerConnection = pc;
-        }
+        peerConnections[targetUserId] = pc;
     }
 
     async function startDirectCall(recipient) {
@@ -467,8 +463,9 @@ document.addEventListener('DOMContentLoaded', () => {
         videoGrid.appendChild(remoteVideoEl);
 
         createPeerConnection(recipient, false);
-        const offer = await directCallPeerConnection.createOffer();
-        await directCallPeerConnection.setLocalDescription(offer);
+        const pc = peerConnections[recipient];
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
         socket.emit('call-user', { recipient, offer });
     }
 
@@ -535,10 +532,11 @@ document.addEventListener('DOMContentLoaded', () => {
         videoGrid.appendChild(remoteVideoEl);
         
         createPeerConnection(incomingCallData.sender, false);
-        await directCallPeerConnection.setRemoteDescription(new RTCSessionDescription(incomingCallData.offer));
-        await directCallPeerConnection.addQueuedIceCandidates();
-        const answer = await directCallPeerConnection.createAnswer();
-        await directCallPeerConnection.setLocalDescription(answer);
+        const pc = peerConnections[incomingCallData.sender];
+        await pc.setRemoteDescription(new RTCSessionDescription(incomingCallData.offer));
+        await pc.addQueuedIceCandidates();
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
         socket.emit('make-answer', { sender: incomingCallData.sender, answer });
         incomingCallData = null;
     });
@@ -552,13 +550,14 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     socket.on('answer-made', async (data) => {
-        if (directCallPeerConnection) {
-            await directCallPeerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
-            await directCallPeerConnection.addQueuedIceCandidates();
+        const pc = peerConnections[data.sender];
+        if (pc) {
+            await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+            await pc.addQueuedIceCandidates();
         }
     });
     socket.on('ice-candidate', (data) => {
-        const pc = directCallPeerConnection;
+        const pc = peerConnections[data.sender];
         const candidate = new RTCIceCandidate(data.candidate);
         if (pc && pc.remoteDescription) {
             pc.addIceCandidate(candidate);
@@ -589,14 +588,14 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     socket.on('webrtc-answer', async ({ fromUserId, answer }) => {
-        const pc = groupCallPeerConnections[fromUserId];
+        const pc = peerConnections[fromUserId];
         if (pc) {
             await pc.setRemoteDescription(new RTCSessionDescription(answer));
             await pc.addQueuedIceCandidates();
         }
     });
     socket.on('webrtc-ice-candidate-group', ({ fromUserId, candidate }) => {
-        const pc = groupCallPeerConnections[fromUserId];
+        const pc = peerConnections[fromUserId];
         const iceCandidate = new RTCIceCandidate(candidate);
         if (pc && pc.remoteDescription) {
             pc.addIceCandidate(iceCandidate);
@@ -606,9 +605,9 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     
     socket.on('user-left-call', ({ userId }) => {
-        if (groupCallPeerConnections[userId]) {
-            groupCallPeerConnections[userId].close();
-            delete groupCallPeerConnections[userId];
+        if (peerConnections[userId]) {
+            peerConnections[userId].close();
+            delete peerConnections[userId];
         }
         const videoEl = document.getElementById(`video-${userId}`);
         if (videoEl) videoEl.remove();
@@ -619,16 +618,14 @@ document.addEventListener('DOMContentLoaded', () => {
         if (currentCallRoomId) {
             socket.emit('leave-call-room', currentCallRoomId);
         }
-        if (directCallPeerConnection) {
-            directCallPeerConnection.close();
-            directCallPeerConnection = null;
+        for (const userId in peerConnections) {
+            peerConnections[userId].close();
+            const videoEl = document.getElementById(`video-${userId}`);
+            if (videoEl) videoEl.remove();
         }
-        Object.values(groupCallPeerConnections).forEach(pc => pc.close());
-        groupCallPeerConnections = {};
-        videoGrid.innerHTML = '';
-        videoGrid.appendChild(localVideo);
-        callModal.classList.add('hidden');
+        peerConnections = {};
         currentCallRoomId = null;
+        callModal.classList.add('hidden');
     }
     endCallBtn.addEventListener('click', endCall);
 
@@ -645,7 +642,7 @@ document.addEventListener('DOMContentLoaded', () => {
         toggleVideoBtn.textContent = enabled ? '📹' : '📸';
     });
     screenShareBtn.addEventListener('click', async () => {
-        const pcs = directCallPeerConnection ? [directCallPeerConnection] : Object.values(groupCallPeerConnections);
+        const pcs = Object.values(peerConnections);
         if (screenStream && screenStream.active) {
             const cameraTrack = localStream.getVideoTracks()[0];
             for (const pc of pcs) {
