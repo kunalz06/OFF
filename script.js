@@ -426,9 +426,7 @@ document.addEventListener('DOMContentLoaded', () => {
         pc.onicecandidate = (event) => {
             if (event.candidate) {
                 const eventName = isGroup ? 'webrtc-ice-candidate-group' : 'ice-candidate';
-                const payload = isGroup 
-                    ? { targetUserId, candidate: event.candidate }
-                    : { recipient: targetUserId, candidate: event.candidate };
+                const payload = { targetUserId, candidate: event.candidate };
                 socket.emit(eventName, payload);
             }
         };
