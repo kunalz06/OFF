@@ -30,7 +30,9 @@
                     <button class="tab-link" data-tab="profile">Profile</button>
                 </nav>
             </div>
-            <!-- Contact list for chats and calls -->
+            <div class="list-header">
+                <button id="new-group-btn">+ New Group</button>
+            </div>
             <div id="contact-list"></div>
         </aside>
 
@@ -42,7 +44,13 @@
                     <p>Or, add a new contact in your profile.</p>
                 </div>
                 <div id="chat-window" class="hidden">
-                    <div id="chat-header"></div>
+                    <div id="chat-header">
+                        <span id="chat-title"></span>
+                        <div id="chat-header-actions">
+                            <button id="call-btn">📞</button>
+                            <button id="group-call-btn" class="hidden">📞 Group</button>
+                        </div>
+                    </div>
                     <div id="messages"></div>
                     <div class="input-area">
                         <input type="text" id="message-input" placeholder="Type a message...">
@@ -64,8 +72,8 @@
             <!-- CALLS TAB CONTENT -->
             <div id="calls-tab" class="tab-content hidden">
                  <div id="calls-welcome-screen">
-                    <h2>Your Friends</h2>
-                    <p>Select a friend from the list on the left to start a call.</p>
+                    <h2>Your Friends & Groups</h2>
+                    <p>Select a friend or group from the list on the left to start a call.</p>
                 </div>
             </div>
 
@@ -93,12 +101,10 @@
 
     <!-- Call Modal -->
     <div id="call-modal" class="hidden">
-        <div class="call-info">
-            <h3 id="call-status"></h3>
-        </div>
-        <div class="video-container">
+        <div class="call-info"><h3 id="call-status"></h3></div>
+        <div id="video-grid">
             <video id="local-video" autoplay muted></video>
-            <video id="remote-video" autoplay></video>
+            <!-- Remote videos will be added here dynamically -->
         </div>
         <div class="call-controls">
             <button id="toggle-audio-btn">🎤</button>
@@ -125,6 +131,20 @@
     <div id="status-viewer" class="hidden">
         <button id="close-viewer-btn">&times;</button>
         <img id="viewer-image" src="" alt="Status full view">
+    </div>
+
+    <!-- Create Group Modal -->
+    <div id="create-group-modal" class="modal-backdrop hidden">
+        <div class="modal-content">
+            <h2>Create New Group</h2>
+            <input type="text" id="group-name-input" placeholder="Group Name">
+            <h3>Select Members</h3>
+            <div id="group-members-list"></div>
+            <div class="modal-actions">
+                <button id="confirm-create-group-btn">Create</button>
+                <button id="cancel-create-group-btn">Cancel</button>
+            </div>
+        </div>
     </div>
 
     <script src="/socket.io/socket.io.js"></script>

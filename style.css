@@ -69,7 +69,8 @@ body {
 /* --- Forms & Buttons --- */
 input[type="text"] { 
     padding: 12px; 
-    width: 80%; 
+    width: 100%; 
+    box-sizing: border-box;
     border-radius: 8px; 
     border: 1px solid #333; 
     margin-top: 20px; 
@@ -102,8 +103,26 @@ button:hover { background-color: var(--secondary-color); }
 .tab-content { padding: 20px; height: 100%; overflow-y: auto; box-sizing: border-box; }
 .tab-content.active { display: block; }
 
-/* --- Contact List --- */
+/* --- Sidebar & Contact List --- */
+.list-header {
+    padding: 10px 15px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+#new-group-btn {
+    width: 100%;
+    margin: 0;
+    padding: 10px;
+    background-color: var(--light-bg);
+}
 #contact-list { flex-grow: 1; overflow-y: auto; }
+.contact-list-section-header {
+    padding: 10px 15px;
+    font-weight: bold;
+    color: #aaa;
+    background: rgba(0,0,0,0.2);
+    text-transform: uppercase;
+    font-size: 0.8rem;
+}
 .contact-item { padding: 15px 20px; cursor: pointer; transition: background 0.2s; border-bottom: 1px solid rgba(255, 255, 255, 0.05); display: flex; align-items: center; justify-content: space-between; }
 .contact-item:hover { background: rgba(255, 255, 255, 0.1); }
 .status-indicator { width: 10px; height: 10px; border-radius: 50%; background-color: #555; }
@@ -119,7 +138,7 @@ button:hover { background-color: var(--secondary-color); }
 
 /* --- Chat Window --- */
 #chat-window { display: flex; flex-direction: column; height: 100%; }
-#chat-header { padding: 15px 20px; background: rgba(0,0,0,0.3); font-size: 1.2rem; }
+#chat-header { padding: 15px 20px; background: rgba(0,0,0,0.3); font-size: 1.2rem; display: flex; justify-content: space-between; align-items: center; }
 #messages { flex-grow: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; }
 .message-bubble { padding: 10px 15px; border-radius: 20px; max-width: 70%; margin-bottom: 10px; word-wrap: break-word; }
 .sent { background-color: var(--primary-color); align-self: flex-end; }
@@ -224,8 +243,19 @@ button:hover { background-color: var(--secondary-color); }
 
 /* --- Call Modal & Toast --- */
 #call-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); backdrop-filter: blur(10px); display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 100; }
-#call-modal .video-container { display: flex; gap: 20px; width: 80%; max-width: 1000px; }
-#call-modal video { width: 50%; border-radius: 10px; background: #000; }
+#video-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 10px;
+    width: 90%;
+    max-width: 1200px;
+    margin: auto;
+}
+#video-grid video {
+    width: 100%;
+    border-radius: 8px;
+    background: #000;
+}
 #call-modal .call-controls { margin-top: 20px; display: flex; gap: 15px; }
 #call-modal .call-controls button { margin: 0; }
 #end-call-btn { background-color: var(--error-color); }
@@ -274,3 +304,46 @@ button:hover { background-color: var(--secondary-color); }
 }
 #accept-call-btn { background-color: var(--success-color); }
 #reject-call-btn { background-color: var(--error-color); }
+
+/* --- Create Group Modal --- */
+.modal-backdrop {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: rgba(0,0,0,0.7);
+    backdrop-filter: blur(5px);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 120;
+}
+.modal-content {
+    background: var(--light-bg);
+    padding: 30px;
+    border-radius: 12px;
+    width: 90%;
+    max-width: 400px;
+}
+.modal-content h2 { margin-top: 0; }
+#group-members-list {
+    max-height: 200px;
+    overflow-y: auto;
+    margin: 15px 0;
+    border: 1px solid #333;
+    border-radius: 8px;
+    padding: 10px;
+}
+.member-selection-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px;
+}
+.modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 15px;
+    margin-top: 20px;
+}
+.modal-actions button { margin: 0; }
+#cancel-create-group-btn { background-color: #555; }
