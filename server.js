@@ -30,7 +30,7 @@ async function connectMongo() {
     try {
         await client.connect();
         console.log("MongoDB connected successfully!");
-        const db = client.db("off_chat_app_final_stable_v3"); // Final DB version
+        const db = client.db("off_chat_app_stable_final"); // Final DB version
         usersCollection = db.collection("users");
         statusesCollection = db.collection("statuses");
         messagesCollection = db.collection("messages");
