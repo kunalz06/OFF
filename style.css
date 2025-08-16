@@ -141,9 +141,13 @@ button:hover { background-color: var(--secondary-color); }
 #chat-header { padding: 15px 20px; background: rgba(0,0,0,0.3); font-size: 1.2rem; display: flex; justify-content: space-between; align-items: center; }
 #messages { flex-grow: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; }
 .message-bubble { padding: 10px 15px; border-radius: 20px; max-width: 70%; margin-bottom: 10px; word-wrap: break-word; }
+.message-bubble .chat-image { max-width: 100%; border-radius: 15px; margin-top: 5px; }
 .sent { background-color: var(--primary-color); align-self: flex-end; }
 .received { background-color: #333; align-self: flex-start; }
-.input-area { padding: 15px; display: flex; background: rgba(0,0,0,0.3); }
+.input-area { padding: 15px; display: flex; background: rgba(0,0,0,0.3); gap: 10px; }
+.input-area input { flex-grow: 1; margin: 0; }
+.input-area button { margin: 0; }
+#upload-image-btn { flex-shrink: 0; padding: 10px; font-size: 1.2rem; }
 
 /* --- Status Tab --- */
 #statuses-feed {
@@ -284,7 +288,7 @@ button:hover { background-color: var(--secondary-color); }
     gap: 15px;
     background: rgba(0,0,0,0.3);
     border-radius: 12px;
-    flex-shrink: 0; /* Prevent controls from shrinking */
+    flex-shrink: 0;
 }
 #call-modal .call-controls button { margin: 0; }
 #end-call-btn { background-color: var(--error-color); }

@@ -6,9 +6,9 @@ document.addEventListener('DOMContentLoaded', () => {
     let activeChat = { id: null, type: null, name: '' };
     let localStream;
     let isBusy = false;
-    let groupCallPeerConnections = {};
-    let directCallPeerConnection;
-    let incomingCallData = null;
+    let peerConnections = {}; // Unified object for all peer connections {userId: pc}
+    let currentCallRoomId = null;
+    let screenStream;
 
     // --- DOM Elements ---
     const loginScreen = document.getElementById('login-screen');
@@ -38,15 +38,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const screenShareBtn = document.getElementById('screen-share-btn');
     const endCallBtn = document.getElementById('end-call-btn');
     const callStatus = document.getElementById('call-status');
-    const incomingCallToast = document.getElementById('incoming-call-toast');
-    const callerUsernameEl = document.getElementById('caller-username');
-    const acceptCallBtn = document.getElementById('accept-call-btn');
-    const rejectCallBtn = document.getElementById('reject-call-btn');
+    const incomingCallToast = document.getElementById('incoming-call-toast'); // This is no longer used but kept for structure
     const statusViewer = document.getElementById('status-viewer');
     const viewerImage = document.getElementById('viewer-image');
     const closeViewerBtn = document.getElementById('close-viewer-btn');
-    const preCallAudioBtn = document.getElementById('pre-call-audio-btn');
-    const preCallVideoBtn = document.getElementById('pre-call-video-btn');
     const newGroupBtn = document.getElementById('new-group-btn');
     const createGroupModal = document.getElementById('create-group-modal');
     const groupNameInput = document.getElementById('group-name-input');
@@ -56,6 +51,19 @@ document.addEventListener('DOMContentLoaded', () => {
     const chatTitle = document.getElementById('chat-title');
     const callBtn = document.getElementById('call-btn');
     const groupCallBtn = document.getElementById('group-call-btn');
+    
+    // Create and append the chat image upload button and input
+    const chatImageInput = document.createElement('input');
+    chatImageInput.type = 'file';
+    chatImageInput.accept = 'image/*';
+    chatImageInput.style.display = 'none';
+    const uploadImageBtn = document.createElement('button');
+    uploadImageBtn.textContent = '🖼️';
+    uploadImageBtn.id = 'upload-image-btn';
+    const inputArea = document.querySelector('.input-area');
+    inputArea.prepend(uploadImageBtn);
+    inputArea.appendChild(chatImageInput);
+
 
     const stunServers = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
@@ -258,23 +266,56 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderMessage(msg) {
         const bubble = document.createElement('div');
         bubble.className = `message-bubble ${msg.sender === currentUser.username ? 'sent' : 'received'}`;
-        bubble.innerText = msg.text;
+        
+        if (msg.type === 'image') {
+            bubble.innerHTML = `<img src="${msg.content}" alt="Sent image" class="chat-image">`;
+        } else {
+            bubble.innerText = msg.content;
+        }
+        
         messagesContainer.appendChild(bubble);
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
     }
     function sendMessage() {
         const text = messageInput.value.trim();
         if (text && activeChat.id) {
+            const messageData = { type: 'text', content: text };
             if (activeChat.type === 'dm') {
-                socket.emit('private-message', { recipient: activeChat.id, text });
+                socket.emit('private-message', { ...messageData, recipient: activeChat.id });
             } else if (activeChat.type === 'group') {
-                socket.emit('group-message', { groupId: activeChat.id, text });
+                socket.emit('group-message', { ...messageData, groupId: activeChat.id });
             }
             messageInput.value = '';
         }
     }
     sendBtn.addEventListener('click', sendMessage);
     messageInput.addEventListener('keypress', (e) => (e.key === 'Enter') && sendMessage());
+
+    uploadImageBtn.addEventListener('click', () => chatImageInput.click());
+    chatImageInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file || !activeChat.id) return;
+        const formData = new FormData();
+        formData.append('chatImage', file);
+        fetch('/upload-chat-image', { method: 'POST', body: formData })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    const messageData = { type: 'image', content: data.url };
+                    if (activeChat.type === 'dm') {
+                        socket.emit('private-message', { ...messageData, recipient: activeChat.id });
+                    } else if (activeChat.type === 'group') {
+                        socket.emit('group-message', { ...messageData, groupId: activeChat.id });
+                    }
+                } else {
+                    alert('Image upload failed!');
+                }
+            })
+            .catch(err => console.error('Upload error:', err))
+            .finally(() => {
+                chatImageInput.value = '';
+            });
+    });
 
     newGroupBtn.addEventListener('click', () => {
         groupMembersList.innerHTML = '';
@@ -309,7 +350,7 @@ document.addEventListener('DOMContentLoaded', () => {
             renderMessage(msg);
         }
         if (msg.sender !== currentUser.username && (activeChat.type !== 'dm' || activeChat.id !== msg.sender)) {
-            showNotification(`New Message from ${msg.sender}`, msg.text);
+            showNotification(`New Message from ${msg.sender}`, msg.type === 'image' ? 'Sent an image' : msg.content);
         }
     });
     socket.on('group-message', (msg) => {
@@ -318,7 +359,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             const group = currentUser.groups.find(g => g._id === msg.groupId);
             if (group && msg.sender !== currentUser.username) {
-                showNotification(`New message in ${group.name}`, `${msg.sender}: ${msg.text}`);
+                showNotification(`New message in ${group.name}`, `${msg.sender}: ${msg.type === 'image' ? 'Sent an image' : msg.content}`);
             }
         }
     });
@@ -353,219 +394,148 @@ document.addEventListener('DOMContentLoaded', () => {
         if (cardToRemove) cardToRemove.remove();
     });
 
-    // --- 5. WebRTC Calling Logic ---
-    callBtn.addEventListener('click', () => startDirectCall(activeChat.id));
-    groupCallBtn.addEventListener('click', () => startGroupCall(activeChat.id));
+    // --- 5. WebRTC Calling Logic (Final Robust Version) ---
+    callBtn.addEventListener('click', () => startCall(activeChat.id, false));
+    groupCallBtn.addEventListener('click', () => startCall(activeChat.id, true));
 
-    function createPeerConnection(recipient, isGroup) {
+    function createPeerConnection(targetUserId) {
         const pc = new RTCPeerConnection(stunServers);
-        const iceCandidateQueue = [];
+        
+        pc.onicecandidate = (event) => {
+            if (event.candidate) {
+                socket.emit('webrtc-ice-candidate', { targetUserId, candidate: event.candidate });
+            }
+        };
 
         pc.ontrack = (event) => {
-            let videoElId = isGroup ? `video-${recipient}` : 'remote-video';
-            let videoEl = document.getElementById(videoElId);
-            if (isGroup && !videoEl) {
+            let videoEl = document.getElementById(`video-${targetUserId}`);
+            if (!videoEl) {
                 videoEl = document.createElement('video');
-                videoEl.id = videoElId;
+                videoEl.id = `video-${targetUserId}`;
                 videoEl.autoplay = true;
                 videoEl.playsInline = true;
                 videoGrid.appendChild(videoEl);
             }
-            if (videoEl && videoEl.srcObject !== event.streams[0]) {
+            if (videoEl.srcObject !== event.streams[0]) {
                 videoEl.srcObject = event.streams[0];
             }
-        };
-
-        pc.onicecandidate = (event) => {
-            if (event.candidate) {
-                const eventName = isGroup ? 'group-ice-candidate' : 'ice-candidate';
-                const payload = isGroup 
-                    ? { target: recipient, group: currentUser.groups.find(g => g._id === activeChat.id), candidate: event.candidate }
-                    : { recipient, candidate: event.candidate };
-                socket.emit(eventName, payload);
-            }
-        };
-
-        pc.addQueuedIceCandidates = async () => {
-            for (const candidate of iceCandidateQueue) {
-                await pc.addIceCandidate(candidate);
-            }
-        };
-
-        pc.queueIceCandidate = (candidate) => {
-            iceCandidateQueue.push(candidate);
         };
 
         if (localStream) {
             localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
         }
-        return pc;
+        
+        peerConnections[targetUserId] = pc;
     }
 
-    async function startDirectCall(recipient) {
+    function startCall(roomId) {
         if (!localStream || localStream.getTracks().length === 0) return alert("Cannot start call. Check media permissions.");
         isBusy = true;
+        currentCallRoomId = roomId;
         callModal.classList.remove('hidden');
-        callStatus.textContent = `Calling ${recipient}...`;
-        directCallPeerConnection = createPeerConnection(recipient, false);
-        const offer = await directCallPeerConnection.createOffer();
-        await directCallPeerConnection.setLocalDescription(offer);
-        socket.emit('call-user', { recipient, offer });
+        callStatus.textContent = `Call: ${activeChat.name}`;
+        socket.emit('join-call-room', roomId);
     }
 
-    async function startGroupCall(groupId) {
-        isBusy = true;
-        callModal.classList.remove('hidden');
-        const group = currentUser.groups.find(g => g._id === groupId);
-        callStatus.textContent = `Group Call: ${group.name}`;
-        for (const member of group.members) {
-            if (member !== currentUser.username) {
-                const pc = createPeerConnection(member, true);
-                groupCallPeerConnections[member] = pc;
-                const offer = await pc.createOffer();
-                await pc.setLocalDescription(offer);
-                socket.emit('group-offer', { target: member, offer });
-            }
-        }
-        socket.emit('start-group-call', groupId);
-    }
-
-    socket.on('call-made', (data) => {
-        if (isBusy) return socket.emit('reject-call', { recipient: currentUser.username, caller: data.sender });
-        isBusy = true;
-        incomingCallData = { ...data, type: 'dm' };
-        callerUsernameEl.textContent = data.sender;
-        incomingCallToast.classList.remove('hidden');
-        showNotification(`Incoming call from ${data.sender}`, 'Click to answer.');
+    socket.on('user-joined-call', async ({ userId }) => {
+        createPeerConnection(userId);
+        const pc = peerConnections[userId];
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        socket.emit('webrtc-offer', { targetUserId: userId, offer });
     });
 
-    socket.on('group-call-started', ({ groupId, groupName, caller, members }) => {
-        if (isBusy) return;
-        if (confirm(`${caller} started a call in ${groupName}. Join?`)) {
-            isBusy = true;
-            activeChat = { id: groupId, type: 'group', name: groupName };
-            callModal.classList.remove('hidden');
-            callStatus.textContent = `Group Call: ${groupName}`;
-            // Connect to all other members who are not the original caller
-            const otherMembers = members.filter(m => m !== currentUser.username && m !== caller);
-            otherMembers.forEach(member => {
-                const pc = createPeerConnection(member, true);
-                groupCallPeerConnections[member] = pc;
-            });
-        }
-    });
-
-    acceptCallBtn.addEventListener('click', async () => {
-        isBusy = true;
-        incomingCallToast.classList.add('hidden');
-        callModal.classList.remove('hidden');
-        callStatus.textContent = `In call with ${incomingCallData.sender}`;
-        directCallPeerConnection = createPeerConnection(incomingCallData.sender, false);
-        await directCallPeerConnection.setRemoteDescription(new RTCSessionDescription(incomingCallData.offer));
-        await directCallPeerConnection.addQueuedIceCandidates();
-        const answer = await directCallPeerConnection.createAnswer();
-        await directCallPeerConnection.setLocalDescription(answer);
-        socket.emit('make-answer', { sender: incomingCallData.sender, answer });
-        incomingCallData = null;
-    });
-
-    rejectCallBtn.addEventListener('click', () => {
-        isBusy = false;
-        incomingCallToast.classList.add('hidden');
-        socket.emit('reject-call', { recipient: currentUser.username, caller: incomingCallData.sender });
-        incomingCallData = null;
-    });
-
-    socket.on('answer-made', async (data) => {
-        if (directCallPeerConnection) {
-            await directCallPeerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
-            await directCallPeerConnection.addQueuedIceCandidates();
-        }
-    });
-    socket.on('ice-candidate', (data) => {
-        const pc = directCallPeerConnection;
-        const candidate = new RTCIceCandidate(data.candidate);
-        if (pc && pc.remoteDescription) {
-            pc.addIceCandidate(candidate);
-        } else if (pc) {
-            pc.queueIceCandidate(candidate);
-        }
-    });
-    socket.on('call-rejected', (data) => {
-        alert(data.reason || `${data.recipient} rejected the call.`);
-        endCall();
-    });
-
-    socket.on('group-offer', async ({ from, offer }) => {
-        const pc = createPeerConnection(from, true);
-        groupCallPeerConnections[from] = pc;
+    socket.on('webrtc-offer', async ({ fromUserId, offer }) => {
+        createPeerConnection(fromUserId);
+        const pc = peerConnections[fromUserId];
         await pc.setRemoteDescription(new RTCSessionDescription(offer));
-        await pc.addQueuedIceCandidates();
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
-        socket.emit('group-answer', { target: from, answer });
+        socket.emit('webrtc-answer', { targetUserId: fromUserId, answer });
     });
-    socket.on('group-answer', async ({ from, answer }) => {
-        const pc = groupCallPeerConnections[from];
-        if (pc) {
+
+    socket.on('webrtc-answer', async ({ fromUserId, answer }) => {
+        const pc = peerConnections[fromUserId];
+        if (pc && pc.signalingState !== 'stable') {
             await pc.setRemoteDescription(new RTCSessionDescription(answer));
-            await pc.addQueuedIceCandidates();
         }
     });
-    socket.on('group-ice-candidate', ({ from, candidate }) => {
-        const pc = groupCallPeerConnections[from];
-        const iceCandidate = new RTCIceCandidate(candidate);
-        if (pc && pc.remoteDescription) {
-            pc.addIceCandidate(iceCandidate);
-        } else if (pc) {
-            pc.queueIceCandidate(iceCandidate);
+
+    socket.on('webrtc-ice-candidate', ({ fromUserId, candidate }) => {
+        const pc = peerConnections[fromUserId];
+        if (pc) {
+            pc.addIceCandidate(new RTCIceCandidate(candidate));
+        }
+    });
+    
+    socket.on('user-left-call', ({ userId }) => {
+        if (peerConnections[userId]) {
+            peerConnections[userId].close();
+            delete peerConnections[userId];
+        }
+        const videoEl = document.getElementById(`video-${userId}`);
+        if (videoEl) {
+            videoEl.remove();
         }
     });
 
     function endCall() {
         isBusy = false;
-        if (directCallPeerConnection) {
-            directCallPeerConnection.close();
-            directCallPeerConnection = null;
+        if (currentCallRoomId) {
+            socket.emit('leave-call-room', currentCallRoomId);
         }
-        Object.values(groupCallPeerConnections).forEach(pc => pc.close());
-        groupCallPeerConnections = {};
-        videoGrid.innerHTML = '';
-        videoGrid.appendChild(localVideo);
+        for (const userId in peerConnections) {
+            peerConnections[userId].close();
+            const videoEl = document.getElementById(`video-${userId}`);
+            if (videoEl) videoEl.remove();
+        }
+        peerConnections = {};
+        currentCallRoomId = null;
         callModal.classList.add('hidden');
     }
     endCallBtn.addEventListener('click', endCall);
 
     toggleAudioBtn.addEventListener('click', () => {
-        const enabled = !localStream.getAudioTracks()[0].enabled;
-        localStream.getAudioTracks()[0].enabled = enabled;
-        toggleAudioBtn.classList.toggle('muted', !enabled);
-        toggleAudioBtn.textContent = enabled ? '🎤' : '🔇';
+        const audioTrack = localStream.getAudioTracks()[0];
+        if (audioTrack) {
+            audioTrack.enabled = !audioTrack.enabled;
+            toggleAudioBtn.classList.toggle('muted', !audioTrack.enabled);
+            toggleAudioBtn.textContent = audioTrack.enabled ? '🎤' : '🔇';
+        }
     });
     toggleVideoBtn.addEventListener('click', () => {
-        const enabled = !localStream.getVideoTracks()[0].enabled;
-        localStream.getVideoTracks()[0].enabled = enabled;
-        toggleVideoBtn.classList.toggle('off', !enabled);
-        toggleVideoBtn.textContent = enabled ? '📹' : '📸';
+        const videoTrack = localStream.getVideoTracks()[0];
+        if (videoTrack) {
+            videoTrack.enabled = !videoTrack.enabled;
+            toggleVideoBtn.classList.toggle('off', !videoTrack.enabled);
+            toggleVideoBtn.textContent = videoTrack.enabled ? '📹' : '📸';
+        }
     });
     screenShareBtn.addEventListener('click', async () => {
         if (screenStream && screenStream.active) {
             const cameraTrack = localStream.getVideoTracks()[0];
-            const sender = (directCallPeerConnection || Object.values(groupCallPeerConnections)[0])?.getSenders().find(s => s.track.kind === 'video');
-            if (sender && cameraTrack) sender.replaceTrack(cameraTrack);
+            for (const pc of Object.values(peerConnections)) {
+                const sender = pc.getSenders().find(s => s.track.kind === 'video');
+                if (sender && cameraTrack) await sender.replaceTrack(cameraTrack);
+            }
             screenStream.getTracks().forEach(track => track.stop());
             screenStream = null;
             screenShareBtn.style.backgroundColor = '#3498db';
         } else {
             screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
             const screenTrack = screenStream.getVideoTracks()[0];
-            const sender = (directCallPeerConnection || Object.values(groupCallPeerConnections)[0])?.getSenders().find(s => s.track.kind === 'video');
-            if (sender) sender.replaceTrack(screenTrack);
+            for (const pc of Object.values(peerConnections)) {
+                const sender = pc.getSenders().find(s => s.track.kind === 'video');
+                if (sender) await sender.replaceTrack(screenTrack);
+            }
             screenShareBtn.style.backgroundColor = 'var(--error-color)';
             screenTrack.onended = () => {
-                if (directCallPeerConnection || Object.keys(groupCallPeerConnections).length > 0) {
+                if (Object.keys(peerConnections).length > 0) {
                     const cameraTrack = localStream.getVideoTracks()[0];
-                    if (sender && cameraTrack) sender.replaceTrack(cameraTrack);
+                    for (const pc of Object.values(peerConnections)) {
+                        const sender = pc.getSenders().find(s => s.track.kind === 'video');
+                        if (sender && cameraTrack) sender.replaceTrack(cameraTrack);
+                    }
                     screenStream = null;
                     screenShareBtn.style.backgroundColor = '#3498db';
                 }
