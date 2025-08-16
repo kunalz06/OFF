@@ -313,6 +313,12 @@ button:hover { background-color: var(--secondary-color); }
     margin: 0;
     text-align: center;
 }
+#pre-call-video {
+    width: 100%;
+    max-width: 200px;
+    border-radius: 8px;
+    background: #000;
+}
 .call-actions {
     display: flex;
     justify-content: space-between;

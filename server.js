@@ -18,10 +18,7 @@ if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir);
 if (!fs.existsSync(chatImagesDir)) fs.mkdirSync(chatImagesDir);
 
 const storage = multer.memoryStorage();
-const upload = multer({ 
-    storage: storage, 
-    limits: { fileSize: 5 * 1024 * 1024 } 
-});
+const upload = multer({ storage: storage, limits: { fileSize: 5 * 1024 * 1024 } });
 app.use('/uploads', express.static(uploadsDir));
 
 // --- MongoDB Connection ---
@@ -33,7 +30,7 @@ async function connectMongo() {
     try {
         await client.connect();
         console.log("MongoDB connected successfully!");
-        const db = client.db("off_chat_app_final_stable_v2"); // Final DB version
+        const db = client.db("off_chat_app_final_stable_v3"); // Final DB version
         usersCollection = db.collection("users");
         statusesCollection = db.collection("statuses");
         messagesCollection = db.collection("messages");

@@ -115,9 +115,14 @@
         </div>
     </div>
     
-    <!-- Incoming Call Notification (No longer used for calls, but kept for structure) -->
+    <!-- Incoming Call Notification -->
     <div id="incoming-call-toast" class="hidden">
         <p><strong id="caller-username"></strong> is calling...</p>
+        <video id="pre-call-video" autoplay muted playsinline></video>
+        <div class="pre-call-controls">
+            <button id="pre-call-audio-btn" class="active">🎤 Audio ON</button>
+            <button id="pre-call-video-btn" class="active">📹 Video ON</button>
+        </div>
         <div class="call-actions">
             <button id="accept-call-btn">Accept</button>
             <button id="reject-call-btn">Reject</button>
