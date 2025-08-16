@@ -32,7 +32,7 @@ async function connectMongo() {
     try {
         await client.connect();
         console.log("MongoDB connected successfully!");
-        const db = client.db("off_chat_app_v8_final"); // Final DB version
+        const db = client.db("off_chat_app_final"); // Final DB version
         usersCollection = db.collection("users");
         statusesCollection = db.collection("statuses");
         messagesCollection = db.collection("messages");
@@ -237,7 +237,7 @@ io.on('connection', (socket) => {
         if (group) {
             group.members.forEach(member => {
                 if (member !== socket.username && onlineUsers[member]) {
-                    io.to(onlineUsers[member]).emit('group-call-started', { groupId, groupName: group.name, caller: socket.username });
+                    io.to(onlineUsers[member]).emit('group-call-started', { groupId, groupName: group.name, caller: socket.username, members: group.members });
                 }
             });
         }
@@ -245,13 +245,8 @@ io.on('connection', (socket) => {
     socket.on('group-offer', (data) => { if (onlineUsers[data.target]) io.to(onlineUsers[data.target]).emit('group-offer', { from: socket.username, offer: data.offer }); });
     socket.on('group-answer', (data) => { if (onlineUsers[data.target]) io.to(onlineUsers[data.target]).emit('group-answer', { from: socket.username, answer: data.answer }); });
     socket.on('group-ice-candidate', (data) => {
-        const group = data.group;
-        if (group && group.members) {
-            group.members.forEach(member => {
-                if (member !== socket.username && onlineUsers[member]) {
-                    io.to(onlineUsers[member]).emit('group-ice-candidate', { from: socket.username, candidate: data.candidate });
-                }
-            });
+        if (onlineUsers[data.target]) {
+            io.to(onlineUsers[data.target]).emit('group-ice-candidate', { from: socket.username, candidate: data.candidate });
         }
     });
 

@@ -380,7 +380,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (event.candidate) {
                 const eventName = isGroup ? 'group-ice-candidate' : 'ice-candidate';
                 const payload = isGroup 
-                    ? { group: currentUser.groups.find(g => g._id === activeChat.id), candidate: event.candidate }
+                    ? { target: recipient, group: currentUser.groups.find(g => g._id === activeChat.id), candidate: event.candidate }
                     : { recipient, candidate: event.candidate };
                 socket.emit(eventName, payload);
             }
@@ -418,7 +418,6 @@ document.addEventListener('DOMContentLoaded', () => {
         callModal.classList.remove('hidden');
         const group = currentUser.groups.find(g => g._id === groupId);
         callStatus.textContent = `Group Call: ${group.name}`;
-        
         for (const member of group.members) {
             if (member !== currentUser.username) {
                 const pc = createPeerConnection(member, true);
@@ -440,18 +439,18 @@ document.addEventListener('DOMContentLoaded', () => {
         showNotification(`Incoming call from ${data.sender}`, 'Click to answer.');
     });
 
-    socket.on('group-call-started', ({ groupId, groupName, caller }) => {
+    socket.on('group-call-started', ({ groupId, groupName, caller, members }) => {
         if (isBusy) return;
         if (confirm(`${caller} started a call in ${groupName}. Join?`)) {
             isBusy = true;
             activeChat = { id: groupId, type: 'group', name: groupName };
             callModal.classList.remove('hidden');
             callStatus.textContent = `Group Call: ${groupName}`;
-            const group = currentUser.groups.find(g => g._id === groupId);
-            group.members.forEach(member => {
-                if (member !== currentUser.username) {
-                    groupCallPeerConnections[member] = createPeerConnection(member, true);
-                }
+            // Connect to all other members who are not the original caller
+            const otherMembers = members.filter(m => m !== currentUser.username && m !== caller);
+            otherMembers.forEach(member => {
+                const pc = createPeerConnection(member, true);
+                groupCallPeerConnections[member] = pc;
             });
         }
     });
@@ -461,7 +460,6 @@ document.addEventListener('DOMContentLoaded', () => {
         incomingCallToast.classList.add('hidden');
         callModal.classList.remove('hidden');
         callStatus.textContent = `In call with ${incomingCallData.sender}`;
-        
         directCallPeerConnection = createPeerConnection(incomingCallData.sender, false);
         await directCallPeerConnection.setRemoteDescription(new RTCSessionDescription(incomingCallData.offer));
         await directCallPeerConnection.addQueuedIceCandidates();
