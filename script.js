@@ -6,8 +6,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let activeChat = { id: null, type: null, name: '' };
     let localStream;
     let isBusy = false;
-    let groupCallPeerConnections = {}; // Stores peer connections for a group call
-    let directCallPeerConnection; // For one-on-one calls
+    let groupCallPeerConnections = {};
+    let directCallPeerConnection;
     let incomingCallData = null;
 
     // --- DOM Elements ---
@@ -161,13 +161,78 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    statusImageInput.addEventListener('change', (e) => { /* ... Unchanged ... */ });
-    function fetchStatuses() { /* ... Unchanged ... */ }
-    function renderStatus(status) { /* ... Unchanged ... */ }
-    statusesFeed.addEventListener('click', (e) => { /* ... Unchanged ... */ });
-    closeViewerBtn.addEventListener('click', () => { /* ... Unchanged ... */ });
-    sendRequestBtn.addEventListener('click', () => { /* ... Unchanged ... */ });
-    friendRequestsList.addEventListener('click', (e) => { /* ... Unchanged ... */ });
+    statusImageInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const formData = new FormData();
+        formData.append('username', currentUser.username);
+        formData.append('statusImage', file);
+        fetch('/upload-status', { method: 'POST', body: formData })
+            .then(res => res.json())
+            .then(data => {
+                if (!data.success) alert('Upload failed!');
+                statusImageInput.value = '';
+            })
+            .catch(err => console.error('Upload error:', err));
+    });
+    function fetchStatuses() {
+        socket.emit('get-statuses', (statuses) => {
+            statusesFeed.innerHTML = '';
+            statuses.forEach(status => renderStatus(status));
+        });
+    }
+    function renderStatus(status) {
+        const card = document.createElement('div');
+        card.className = 'status-card';
+        card.dataset.statusId = status._id;
+        card.dataset.imageUrl = status.imageUrl;
+        let deleteButtonHTML = '';
+        if (currentUser.username === status.username) {
+            deleteButtonHTML = `<button class="delete-status-btn" data-status-id="${status._id}">&times;</button>`;
+        }
+        card.innerHTML = `<img src="${status.imageUrl}" alt="Status by ${status.username}"><p><strong>${status.username}</strong></p>${deleteButtonHTML}`;
+        statusesFeed.prepend(card);
+    }
+    statusesFeed.addEventListener('click', (e) => {
+        const target = e.target;
+        if (target.classList.contains('delete-status-btn')) {
+            e.stopPropagation();
+            const statusId = target.dataset.statusId;
+            if (confirm('Are you sure you want to delete this status?')) {
+                socket.emit('delete-status', statusId, (response) => {
+                    if (!response.success) alert(`Error: ${response.message}`);
+                });
+            }
+        } else {
+            const card = target.closest('.status-card');
+            if (card) {
+                viewerImage.src = card.dataset.imageUrl;
+                statusViewer.classList.remove('hidden');
+            }
+        }
+    });
+    closeViewerBtn.addEventListener('click', () => {
+        statusViewer.classList.add('hidden');
+        viewerImage.src = '';
+    });
+    sendRequestBtn.addEventListener('click', () => {
+        const recipientUsername = addUsernameInput.value.trim();
+        if (recipientUsername) {
+            socket.emit('send-friend-request', { recipientUsername }, (response) => {
+                alert(response.message);
+                if (response.success) addUsernameInput.value = '';
+            });
+        }
+    });
+    friendRequestsList.addEventListener('click', (e) => {
+        if (e.target.tagName === 'BUTTON') {
+            const senderUsername = e.target.dataset.username;
+            socket.emit('accept-friend-request', senderUsername, (response) => {
+                if (response.success) currentUser = response.userData;
+                updateUI();
+            });
+        }
+    });
 
     function openChat(id, type, name) {
         activeChat = { id, type, name };
@@ -190,7 +255,6 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
     }
-
     function renderMessage(msg) {
         const bubble = document.createElement('div');
         bubble.className = `message-bubble ${msg.sender === currentUser.username ? 'sent' : 'received'}`;
@@ -198,7 +262,6 @@ document.addEventListener('DOMContentLoaded', () => {
         messagesContainer.appendChild(bubble);
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
     }
-
     function sendMessage() {
         const text = messageInput.value.trim();
         if (text && activeChat.id) {
@@ -213,7 +276,6 @@ document.addEventListener('DOMContentLoaded', () => {
     sendBtn.addEventListener('click', sendMessage);
     messageInput.addEventListener('keypress', (e) => (e.key === 'Enter') && sendMessage());
 
-    // --- Group Creation ---
     newGroupBtn.addEventListener('click', () => {
         groupMembersList.innerHTML = '';
         currentUser.friends.forEach(friend => {
@@ -224,9 +286,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         createGroupModal.classList.remove('hidden');
     });
-
     cancelCreateGroupBtn.addEventListener('click', () => createGroupModal.classList.add('hidden'));
-
     confirmCreateGroupBtn.addEventListener('click', () => {
         const groupName = groupNameInput.value.trim();
         const selectedMembers = Array.from(groupMembersList.querySelectorAll('input:checked')).map(input => input.value);
@@ -243,14 +303,21 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // --- Socket Event Handlers ---
-    socket.on('private-message', (msg) => { /* ... Unchanged ... */ });
+    // --- 4. Real-time Socket Event Handlers ---
+    socket.on('private-message', (msg) => {
+        if (activeChat.type === 'dm' && (msg.sender === activeChat.id || msg.sender === currentUser.username)) {
+            renderMessage(msg);
+        }
+        if (msg.sender !== currentUser.username && (activeChat.type !== 'dm' || activeChat.id !== msg.sender)) {
+            showNotification(`New Message from ${msg.sender}`, msg.text);
+        }
+    });
     socket.on('group-message', (msg) => {
         if (activeChat.type === 'group' && activeChat.id === msg.groupId) {
             renderMessage(msg);
         } else {
             const group = currentUser.groups.find(g => g._id === msg.groupId);
-            if (group) {
+            if (group && msg.sender !== currentUser.username) {
                 showNotification(`New message in ${group.name}`, `${msg.sender}: ${msg.text}`);
             }
         }
@@ -260,20 +327,38 @@ document.addEventListener('DOMContentLoaded', () => {
         updateUI();
         showNotification(`Added to new group: ${group.name}`, `By ${group.createdBy}`);
     });
-    socket.on('new-friend-request', (senderUsername) => { /* ... Unchanged ... */ });
-    socket.on('request-accepted', (updatedUserData) => { /* ... Unchanged ... */ });
-    socket.on('friend-online', (username) => { /* ... Unchanged ... */ });
-    socket.on('friend-offline', (username) => { /* ... Unchanged ... */ });
-    socket.on('new-status-posted', (status) => { /* ... Unchanged ... */ });
-    socket.on('status-deleted', (statusId) => { /* ... Unchanged ... */ });
+    socket.on('new-friend-request', (senderUsername) => {
+        if (!currentUser.friendRequests.includes(senderUsername)) currentUser.friendRequests.push(senderUsername);
+        updateUI();
+        showNotification('New Friend Request', `From ${senderUsername}`);
+    });
+    socket.on('request-accepted', (updatedUserData) => {
+        currentUser = updatedUserData;
+        updateUI();
+        showNotification('Friend Request Accepted', `You are now friends.`);
+    });
+    socket.on('friend-online', (username) => {
+        const indicator = document.querySelector(`.contact-item[data-username="${username}"] .status-indicator`);
+        if (indicator) indicator.classList.add('online');
+    });
+    socket.on('friend-offline', (username) => {
+        const indicator = document.querySelector(`.contact-item[data-username="${username}"] .status-indicator`);
+        if (indicator) indicator.classList.remove('online');
+    });
+    socket.on('new-status-posted', (status) => {
+        if (activeTab === 'status') renderStatus(status);
+    });
+    socket.on('status-deleted', (statusId) => {
+        const cardToRemove = document.querySelector(`.status-card[data-status-id="${statusId}"]`);
+        if (cardToRemove) cardToRemove.remove();
+    });
 
-    // --- WebRTC Calling Logic (Direct & Group) ---
+    // --- 5. WebRTC Calling Logic ---
     callBtn.addEventListener('click', () => startCall(activeChat.id));
     groupCallBtn.addEventListener('click', () => startGroupCall(activeChat.id));
 
     function createPeerConnection(recipient, isGroupCall = false) {
         const pc = new RTCPeerConnection(stunServers);
-
         pc.ontrack = (event) => {
             let videoElId = isGroupCall ? `video-${recipient}` : 'remote-video';
             let videoEl = document.getElementById(videoElId);
@@ -281,13 +366,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 videoEl = document.createElement('video');
                 videoEl.id = videoElId;
                 videoEl.autoplay = true;
+                videoEl.playsInline = true;
                 videoGrid.appendChild(videoEl);
             }
-            if (videoEl) {
+            if (videoEl && videoEl.srcObject !== event.streams[0]) {
                 videoEl.srcObject = event.streams[0];
             }
         };
-
         pc.onicecandidate = (event) => {
             if (event.candidate) {
                 if (isGroupCall) {
@@ -298,7 +383,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
         };
-
         if (localStream) {
             localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
         }
@@ -321,7 +405,6 @@ document.addEventListener('DOMContentLoaded', () => {
         callModal.classList.remove('hidden');
         const group = currentUser.groups.find(g => g._id === groupId);
         callStatus.textContent = `Group Call: ${group.name}`;
-        
         for (const member of group.members) {
             if (member !== currentUser.username) {
                 const pc = createPeerConnection(member, true);
@@ -347,6 +430,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (isBusy) return;
         if (confirm(`${caller} started a call in ${groupName}. Join?`)) {
             isBusy = true;
+            activeChat = { id: groupId, type: 'group', name: groupName };
             callModal.classList.remove('hidden');
             callStatus.textContent = `Group Call: ${groupName}`;
             const group = currentUser.groups.find(g => g._id === groupId);
@@ -363,7 +447,6 @@ document.addEventListener('DOMContentLoaded', () => {
         incomingCallToast.classList.add('hidden');
         callModal.classList.remove('hidden');
         callStatus.textContent = `In call with ${incomingCallData.sender}`;
-        
         directCallPeerConnection = createPeerConnection(incomingCallData.sender);
         await directCallPeerConnection.setRemoteDescription(new RTCSessionDescription(incomingCallData.offer));
         const answer = await directCallPeerConnection.createAnswer();
@@ -421,7 +504,17 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     endCallBtn.addEventListener('click', endCall);
 
-    toggleAudioBtn.addEventListener('click', () => { /* ... Unchanged ... */ });
-    toggleVideoBtn.addEventListener('click', () => { /* ... Unchanged ... */ });
+    toggleAudioBtn.addEventListener('click', () => {
+        const enabled = !localStream.getAudioTracks()[0].enabled;
+        localStream.getAudioTracks()[0].enabled = enabled;
+        toggleAudioBtn.classList.toggle('muted', !enabled);
+        toggleAudioBtn.textContent = enabled ? '🎤' : '🔇';
+    });
+    toggleVideoBtn.addEventListener('click', () => {
+        const enabled = !localStream.getVideoTracks()[0].enabled;
+        localStream.getVideoTracks()[0].enabled = enabled;
+        toggleVideoBtn.classList.toggle('off', !enabled);
+        toggleVideoBtn.textContent = enabled ? '📹' : '📸';
+    });
     screenShareBtn.addEventListener('click', async () => { /* ... Unchanged ... */ });
 });

@@ -32,11 +32,11 @@ async function connectMongo() {
     try {
         await client.connect();
         console.log("MongoDB connected successfully!");
-        const db = client.db("off_chat_app_v8"); // New DB version for group features
+        const db = client.db("off_chat_app_v8_final"); // Final DB version
         usersCollection = db.collection("users");
         statusesCollection = db.collection("statuses");
         messagesCollection = db.collection("messages");
-        groupsCollection = db.collection("groups"); // New collection for groups
+        groupsCollection = db.collection("groups");
         
         await usersCollection.createIndex({ username: 1 }, { unique: true });
         await groupsCollection.createIndex({ name: 1 }, { unique: true });
@@ -78,7 +78,7 @@ app.post('/upload-status', upload.single('statusImage'), async (req, res) => {
     }
 });
 
-// Helper function to get user data, now including groups
+// Helper function to get user data
 const getUserData = async (username) => {
     const user = await usersCollection.findOne({ username });
     if (!user) return null;
@@ -114,10 +114,62 @@ io.on('connection', (socket) => {
             callback({ success: false, message: "Username might be taken or a database error occurred." });
         }
     });
-    socket.on('send-friend-request', async ({ recipientUsername }, callback) => { /* ... Unchanged ... */ });
-    socket.on('accept-friend-request', async (senderUsername, callback) => { /* ... Unchanged ... */ });
-    socket.on('get-statuses', async (callback) => { /* ... Unchanged ... */ });
-    socket.on('delete-status', async (statusId, callback) => { /* ... Unchanged ... */ });
+    socket.on('send-friend-request', async ({ recipientUsername }, callback) => {
+        const senderUsername = socket.username;
+        if (senderUsername === recipientUsername) return callback({ success: false, message: "You can't add yourself." });
+        const recipient = await usersCollection.findOne({ username: recipientUsername });
+        const sender = await usersCollection.findOne({ username: senderUsername });
+        if (!sender) return callback({ success: false, message: "Could not identify sender." });
+        if (!recipient) return callback({ success: false, message: "User not found." });
+        if (recipient.friendRequests?.some(id => id.equals(sender._id)) || recipient.friends?.some(id => id.equals(sender._id))) {
+             return callback({ success: false, message: "Request already sent or you are already friends." });
+        }
+        await usersCollection.updateOne({ _id: recipient._id }, { $addToSet: { friendRequests: sender._id } });
+        if (onlineUsers[recipientUsername]) {
+            io.to(onlineUsers[recipientUsername]).emit('new-friend-request', senderUsername);
+        }
+        callback({ success: true, message: "Friend request sent!" });
+    });
+    socket.on('accept-friend-request', async (senderUsername, callback) => {
+        const recipientUsername = socket.username;
+        const recipient = await usersCollection.findOne({ username: recipientUsername });
+        const sender = await usersCollection.findOne({ username: senderUsername });
+        if (!sender || !recipient) return callback({ success: false, message: "User not found." });
+        await usersCollection.updateOne({ _id: recipient._id }, { $addToSet: { friends: sender._id }, $pull: { friendRequests: sender._id } });
+        await usersCollection.updateOne({ _id: sender._id }, { $addToSet: { friends: recipient._id } });
+        const updatedRecipientData = await getUserData(recipientUsername);
+        callback({ success: true, userData: updatedRecipientData });
+        if (onlineUsers[senderUsername]) {
+            const updatedSenderData = await getUserData(senderUsername);
+            io.to(onlineUsers[senderUsername]).emit('request-accepted', updatedSenderData);
+        }
+    });
+    socket.on('get-statuses', async (callback) => {
+        try {
+            const statuses = await statusesCollection.find().sort({ timestamp: -1 }).toArray();
+            callback(statuses);
+        } catch (error) {
+            console.error('Error fetching statuses:', error);
+            callback([]);
+        }
+    });
+    socket.on('delete-status', async (statusId, callback) => {
+        if (!socket.username) return callback({ success: false, message: 'Authentication error.' });
+        try {
+            const status = await statusesCollection.findOne({ _id: new ObjectId(statusId) });
+            if (!status || status.username !== socket.username) return callback({ success: false, message: 'Unauthorized.' });
+            await statusesCollection.deleteOne({ _id: new ObjectId(statusId) });
+            const imagePath = path.join(__dirname, status.imageUrl);
+            fs.unlink(imagePath, (err) => {
+                if (err) console.error("Error deleting status image file:", err);
+            });
+            io.emit('status-deleted', statusId);
+            callback({ success: true });
+        } catch (error) {
+            console.error("Error deleting status:", error);
+            callback({ success: false, message: 'Server error.' });
+        }
+    });
 
     // --- Messaging (Direct & Group) ---
     socket.on('private-message', async ({ recipient, text }) => {
@@ -180,7 +232,6 @@ io.on('connection', (socket) => {
     socket.on('ice-candidate', (data) => { if (onlineUsers[data.recipient]) io.to(onlineUsers[data.recipient]).emit('ice-candidate', { candidate: data.candidate, sender: socket.username }); });
     socket.on('reject-call', (data) => { if (onlineUsers[data.caller]) io.to(onlineUsers[data.caller]).emit('call-rejected', { reason: `${data.recipient} is busy.` }); });
     
-    // Group Call Signaling
     socket.on('start-group-call', async (groupId) => {
         const group = await groupsCollection.findOne({ _id: new ObjectId(groupId) });
         if (group) {
@@ -191,15 +242,8 @@ io.on('connection', (socket) => {
             });
         }
     });
-
-    socket.on('group-offer', (data) => {
-        if (onlineUsers[data.target]) io.to(onlineUsers[data.target]).emit('group-offer', { from: socket.username, offer: data.offer });
-    });
-
-    socket.on('group-answer', (data) => {
-        if (onlineUsers[data.target]) io.to(onlineUsers[data.target]).emit('group-answer', { from: socket.username, answer: data.answer });
-    });
-
+    socket.on('group-offer', (data) => { if (onlineUsers[data.target]) io.to(onlineUsers[data.target]).emit('group-offer', { from: socket.username, offer: data.offer }); });
+    socket.on('group-answer', (data) => { if (onlineUsers[data.target]) io.to(onlineUsers[data.target]).emit('group-answer', { from: socket.username, answer: data.answer }); });
     socket.on('group-ice-candidate', (data) => {
         const group = data.group;
         if (group && group.members) {
