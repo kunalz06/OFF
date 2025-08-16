@@ -242,7 +242,20 @@ button:hover { background-color: var(--secondary-color); }
 }
 
 /* --- Call Modal & Toast --- */
-#call-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); backdrop-filter: blur(10px); display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 100; }
+#call-modal { 
+    position: fixed; 
+    top: 0; 
+    left: 0; 
+    width: 100%; 
+    height: 100%; 
+    background: rgba(0,0,0,0.8); 
+    backdrop-filter: blur(10px); 
+    display: flex; 
+    flex-direction: column; 
+    justify-content: center; 
+    align-items: center; 
+    z-index: 100; 
+}
 #video-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
@@ -250,13 +263,28 @@ button:hover { background-color: var(--secondary-color); }
     width: 90%;
     max-width: 1200px;
     margin: auto;
+    flex-grow: 1; /* Allow grid to take up space */
+    align-content: center;
 }
 #video-grid video {
     width: 100%;
     border-radius: 8px;
     background: #000;
 }
-#call-modal .call-controls { margin-top: 20px; display: flex; gap: 15px; }
+#call-modal .call-info {
+    padding: 10px;
+}
+/* **FIX: Ensure call controls are always visible** */
+#call-modal .call-controls { 
+    margin: 20px 0; 
+    display: flex; 
+    gap: 15px;
+    padding: 10px;
+    background: rgba(0,0,0,0.3);
+    border-radius: 12px;
+    position: relative; /* Ensure it's not pushed out of view */
+    bottom: 0;
+}
 #call-modal .call-controls button { margin: 0; }
 #end-call-btn { background-color: var(--error-color); }
 #screen-share-btn { background-color: #3498db; }

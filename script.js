@@ -6,11 +6,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let activeChat = { id: null, type: null, name: '' };
     let localStream;
     let isBusy = false;
-    
-    // **FIX: Separated state for direct and group calls**
+    let groupCallPeerConnections = {};
     let directCallPeerConnection;
-    let groupCallPeerConnections = {}; // { 'username': RTCPeerConnection }
-    
     let incomingCallData = null;
 
     // --- DOM Elements ---
@@ -105,7 +102,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // --- 3. UI, Status, Friend, and Chat Logic (Complete) ---
+    // --- 3. UI, Status, Friend, and Chat Logic ---
     function updateUI() {
         profileUsername.textContent = `Welcome, ${currentUser.username}`;
         friendRequestsList.innerHTML = '';
@@ -356,7 +353,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (cardToRemove) cardToRemove.remove();
     });
 
-    // --- 5. WebRTC Calling Logic (Final Robust Version) ---
+    // --- 5. WebRTC Calling Logic ---
     callBtn.addEventListener('click', () => startDirectCall(activeChat.id));
     groupCallBtn.addEventListener('click', () => startGroupCall(activeChat.id));
 
@@ -365,7 +362,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const iceCandidateQueue = [];
 
         pc.ontrack = (event) => {
-            const videoElId = isGroup ? `video-${recipient}` : 'remote-video';
+            let videoElId = isGroup ? `video-${recipient}` : 'remote-video';
             let videoEl = document.getElementById(videoElId);
             if (isGroup && !videoEl) {
                 videoEl = document.createElement('video');
@@ -421,6 +418,7 @@ document.addEventListener('DOMContentLoaded', () => {
         callModal.classList.remove('hidden');
         const group = currentUser.groups.find(g => g._id === groupId);
         callStatus.textContent = `Group Call: ${group.name}`;
+        
         for (const member of group.members) {
             if (member !== currentUser.username) {
                 const pc = createPeerConnection(member, true);
@@ -463,6 +461,7 @@ document.addEventListener('DOMContentLoaded', () => {
         incomingCallToast.classList.add('hidden');
         callModal.classList.remove('hidden');
         callStatus.textContent = `In call with ${incomingCallData.sender}`;
+        
         directCallPeerConnection = createPeerConnection(incomingCallData.sender, false);
         await directCallPeerConnection.setRemoteDescription(new RTCSessionDescription(incomingCallData.offer));
         await directCallPeerConnection.addQueuedIceCandidates();
