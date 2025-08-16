@@ -7,8 +7,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let localStream;
     let previewStream;
     let isBusy = false;
-    let peerConnections = {}; // Unified object for all peer connections
-    let directCallPeerConnection; // Specifically for one-on-one calls
+    let peerConnections = {}; // Unified object for ALL peer connections
     let incomingCallData = null;
     let currentCallRoomId = null;
     let screenStream;
@@ -410,7 +409,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const iceCandidateQueue = [];
 
         pc.ontrack = (event) => {
-            let videoElId = isGroup ? `video-${targetUserId}` : 'remote-video';
+            const videoElId = isGroup ? `video-${targetUserId}` : 'remote-video';
             let videoEl = document.getElementById(videoElId);
             if (isGroup && !videoEl) {
                 videoEl = document.createElement('video');
@@ -427,7 +426,9 @@ document.addEventListener('DOMContentLoaded', () => {
         pc.onicecandidate = (event) => {
             if (event.candidate) {
                 const eventName = isGroup ? 'webrtc-ice-candidate-group' : 'ice-candidate';
-                const payload = { targetUserId, candidate: event.candidate };
+                const payload = isGroup 
+                    ? { targetUserId, candidate: event.candidate }
+                    : { recipient: targetUserId, candidate: event.candidate };
                 socket.emit(eventName, payload);
             }
         };
@@ -445,11 +446,16 @@ document.addEventListener('DOMContentLoaded', () => {
         if (localStream) {
             localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
         }
-        return pc;
+        
+        if (isGroup) {
+            groupCallPeerConnections[targetUserId] = pc;
+        } else {
+            directCallPeerConnection = pc;
+        }
     }
 
     async function startDirectCall(recipient) {
-        if (!localStream || localStream.getTracks().length === 0) return alert("Cannot start call. Check media permissions.");
+        if (!localStream || !localStream.active) return alert("Cannot start call. Check media permissions.");
         isBusy = true;
         callModal.classList.remove('hidden');
         callStatus.textContent = `Calling ${recipient}...`;
@@ -462,7 +468,7 @@ document.addEventListener('DOMContentLoaded', () => {
         videoGrid.appendChild(localVideo);
         videoGrid.appendChild(remoteVideoEl);
 
-        directCallPeerConnection = createPeerConnection(recipient, false);
+        createPeerConnection(recipient, false);
         const offer = await directCallPeerConnection.createOffer();
         await directCallPeerConnection.setLocalDescription(offer);
         socket.emit('call-user', { recipient, offer });
@@ -483,12 +489,17 @@ document.addEventListener('DOMContentLoaded', () => {
         incomingCallData = { ...data, type: 'dm' };
         callerUsernameEl.textContent = data.sender;
         
-        // Start pre-call preview
         try {
             previewStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
             preCallVideo.srcObject = previewStream;
+            preCallAudioBtn.classList.add('active');
+            preCallAudioBtn.textContent = '🎤 Audio ON';
+            preCallVideoBtn.classList.add('active');
+            preCallVideoBtn.textContent = '📹 Video ON';
         } catch (err) {
             console.error("Could not get media for preview:", err);
+            isBusy = false;
+            return;
         }
         
         incomingCallToast.classList.remove('hidden');
@@ -503,9 +514,13 @@ document.addEventListener('DOMContentLoaded', () => {
         
         const isAudioEnabled = preCallAudioBtn.classList.contains('active');
         const isVideoEnabled = preCallVideoBtn.classList.contains('active');
-        previewStream.getAudioTracks().forEach(t => t.enabled = isAudioEnabled);
-        previewStream.getVideoTracks().forEach(t => t.enabled = isVideoEnabled);
+        
+        if (localStream) localStream.getTracks().forEach(t => t.stop());
         localStream = previewStream;
+        previewStream = null;
+
+        localStream.getAudioTracks().forEach(t => t.enabled = isAudioEnabled);
+        localStream.getVideoTracks().forEach(t => t.enabled = isVideoEnabled);
         localVideo.srcObject = localStream;
         
         toggleAudioBtn.classList.toggle('muted', !isAudioEnabled);
@@ -521,7 +536,7 @@ document.addEventListener('DOMContentLoaded', () => {
         videoGrid.appendChild(localVideo);
         videoGrid.appendChild(remoteVideoEl);
         
-        directCallPeerConnection = createPeerConnection(incomingCallData.sender, false);
+        createPeerConnection(incomingCallData.sender, false);
         await directCallPeerConnection.setRemoteDescription(new RTCSessionDescription(incomingCallData.offer));
         await directCallPeerConnection.addQueuedIceCandidates();
         const answer = await directCallPeerConnection.createAnswer();
@@ -631,7 +646,38 @@ document.addEventListener('DOMContentLoaded', () => {
         toggleVideoBtn.classList.toggle('off', !enabled);
         toggleVideoBtn.textContent = enabled ? '📹' : '📸';
     });
-    screenShareBtn.addEventListener('click', async () => { /* ... Unchanged ... */ });
+    screenShareBtn.addEventListener('click', async () => {
+        const pcs = directCallPeerConnection ? [directCallPeerConnection] : Object.values(groupCallPeerConnections);
+        if (screenStream && screenStream.active) {
+            const cameraTrack = localStream.getVideoTracks()[0];
+            for (const pc of pcs) {
+                const sender = pc.getSenders().find(s => s.track.kind === 'video');
+                if (sender && cameraTrack) await sender.replaceTrack(cameraTrack);
+            }
+            screenStream.getTracks().forEach(track => track.stop());
+            screenStream = null;
+            screenShareBtn.style.backgroundColor = '#3498db';
+        } else {
+            screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+            const screenTrack = screenStream.getVideoTracks()[0];
+            for (const pc of pcs) {
+                const sender = pc.getSenders().find(s => s.track.kind === 'video');
+                if (sender) await sender.replaceTrack(screenTrack);
+            }
+            screenShareBtn.style.backgroundColor = 'var(--error-color)';
+            screenTrack.onended = () => {
+                if (Object.keys(peerConnections).length > 0) {
+                    const cameraTrack = localStream.getVideoTracks()[0];
+                    for (const pc of pcs) {
+                        const sender = pc.getSenders().find(s => s.track.kind === 'video');
+                        if (sender && cameraTrack) sender.replaceTrack(cameraTrack);
+                    }
+                    screenStream = null;
+                    screenShareBtn.style.backgroundColor = '#3498db';
+                }
+            };
+        }
+    });
 
     preCallAudioBtn.addEventListener('click', () => {
         const enabled = !preCallAudioBtn.classList.contains('active');

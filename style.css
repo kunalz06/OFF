@@ -282,7 +282,7 @@ button:hover { background-color: var(--secondary-color); }
     flex-shrink: 0;
 }
 #call-modal .call-controls { 
-    margin: 0;
+    margin: 20px 0 0 0; /* Changed from margin: 0 */
     padding: 15px;
     display: flex; 
     gap: 15px;
@@ -318,6 +318,7 @@ button:hover { background-color: var(--secondary-color); }
     max-width: 200px;
     border-radius: 8px;
     background: #000;
+    margin: 0 auto;
 }
 .call-actions {
     display: flex;
