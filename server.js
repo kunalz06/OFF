@@ -131,16 +131,112 @@ io.on('connection', (socket) => {
         }
     });
 
-    // --- All other non-call event handlers are unchanged ---
-    socket.on('send-friend-request', async ({ recipientUsername }, callback) => { /* ... */ });
-    socket.on('accept-friend-request', async (senderUsername, callback) => { /* ... */ });
-    socket.on('get-statuses', async (callback) => { /* ... */ });
-    socket.on('delete-status', async (statusId, callback) => { /* ... */ });
-    socket.on('create-group', async ({ groupName, members }, callback) => { /* ... */ });
-    socket.on('private-message', async (messageData) => { /* ... */ });
-    socket.on('get-chat-history', async ({ friendUsername }, callback) => { /* ... */ });
-    socket.on('group-message', async (messageData) => { /* ... */ });
-    socket.on('get-group-chat-history', async ({ groupId }, callback) => { /* ... */ });
+    // --- All other non-call event handlers ---
+    socket.on('send-friend-request', async ({ recipientUsername }, callback) => {
+        const senderUsername = socket.username;
+        if (senderUsername === recipientUsername) return callback({ success: false, message: "You can't add yourself." });
+        const recipient = await usersCollection.findOne({ username: recipientUsername });
+        const sender = await usersCollection.findOne({ username: senderUsername });
+        if (!sender) return callback({ success: false, message: "Could not identify sender." });
+        if (!recipient) return callback({ success: false, message: "User not found." });
+        if (recipient.friendRequests?.some(id => id.equals(sender._id)) || recipient.friends?.some(id => id.equals(sender._id))) {
+             return callback({ success: false, message: "Request already sent or you are already friends." });
+        }
+        await usersCollection.updateOne({ _id: recipient._id }, { $addToSet: { friendRequests: sender._id } });
+        if (onlineUsers[recipientUsername]) {
+            io.to(onlineUsers[recipientUsername]).emit('new-friend-request', senderUsername);
+        }
+        callback({ success: true, message: "Friend request sent!" });
+    });
+    socket.on('accept-friend-request', async (senderUsername, callback) => {
+        const recipientUsername = socket.username;
+        const recipient = await usersCollection.findOne({ username: recipientUsername });
+        const sender = await usersCollection.findOne({ username: senderUsername });
+        if (!sender || !recipient) return callback({ success: false, message: "User not found." });
+        await usersCollection.updateOne({ _id: recipient._id }, { $addToSet: { friends: sender._id }, $pull: { friendRequests: sender._id } });
+        await usersCollection.updateOne({ _id: sender._id }, { $addToSet: { friends: recipient._id } });
+        const updatedRecipientData = await getUserData(recipientUsername);
+        callback({ success: true, userData: updatedRecipientData });
+        if (onlineUsers[senderUsername]) {
+            const updatedSenderData = await getUserData(senderUsername);
+            io.to(onlineUsers[senderUsername]).emit('request-accepted', updatedSenderData);
+        }
+    });
+    socket.on('get-statuses', async (callback) => {
+        try {
+            const statuses = await statusesCollection.find().sort({ timestamp: -1 }).toArray();
+            callback(statuses);
+        } catch (error) {
+            console.error('Error fetching statuses:', error);
+            callback([]);
+        }
+    });
+    socket.on('delete-status', async (statusId, callback) => {
+        if (!socket.username) return callback({ success: false, message: 'Authentication error.' });
+        try {
+            const status = await statusesCollection.findOne({ _id: new ObjectId(statusId) });
+            if (!status || status.username !== socket.username) return callback({ success: false, message: 'Unauthorized.' });
+            await statusesCollection.deleteOne({ _id: new ObjectId(statusId) });
+            const imagePath = path.join(__dirname, status.imageUrl);
+            fs.unlink(imagePath, (err) => {
+                if (err) console.error("Error deleting status image file:", err);
+            });
+            io.emit('status-deleted', statusId);
+            callback({ success: true });
+        } catch (error) {
+            console.error("Error deleting status:", error);
+            callback({ success: false, message: 'Server error.' });
+        }
+    });
+    socket.on('create-group', async ({ groupName, members }, callback) => {
+        try {
+            const allMembers = [...new Set([socket.username, ...members])];
+            const newGroup = { name: groupName, members: allMembers, createdBy: socket.username };
+            const result = await groupsCollection.insertOne(newGroup);
+            const createdGroup = { ...newGroup, _id: result.insertedId };
+            
+            allMembers.forEach(member => {
+                if (onlineUsers[member]) {
+                    io.to(onlineUsers[member]).emit('added-to-group', createdGroup);
+                }
+            });
+            callback({ success: true, group: createdGroup });
+        } catch (error) {
+            callback({ success: false, message: "Group name might be taken or an error occurred." });
+        }
+    });
+    socket.on('private-message', async (messageData) => {
+        const fullMessage = { ...messageData, sender: socket.username, timestamp: new Date() };
+        await messagesCollection.insertOne(fullMessage);
+        const recipientSocketId = onlineUsers[messageData.recipient];
+        if (recipientSocketId) {
+            io.to(recipientSocketId).to(socket.id).emit('private-message', fullMessage);
+        } else {
+            socket.emit('private-message', fullMessage);
+        }
+    });
+    socket.on('get-chat-history', async ({ friendUsername }, callback) => {
+        const history = await messagesCollection.find({
+            $or: [{ sender: socket.username, recipient: friendUsername }, { sender: friendUsername, recipient: socket.username }]
+        }).sort({ timestamp: 1 }).toArray();
+        callback(history);
+    });
+    socket.on('group-message', async (messageData) => {
+        const fullMessage = { ...messageData, sender: socket.username, timestamp: new Date() };
+        await messagesCollection.insertOne(fullMessage);
+        const group = await groupsCollection.findOne({ _id: new ObjectId(messageData.groupId) });
+        if (group) {
+            group.members.forEach(member => {
+                if (onlineUsers[member]) {
+                    io.to(onlineUsers[member]).emit('group-message', fullMessage);
+                }
+            });
+        }
+    });
+    socket.on('get-group-chat-history', async ({ groupId }, callback) => {
+        const history = await messagesCollection.find({ groupId }).sort({ timestamp: 1 }).toArray();
+        callback(history);
+    });
 
     // --- **RE-ARCHITECTED STABLE WebRTC Signaling Logic** ---
 
@@ -200,8 +296,16 @@ io.on('connection', (socket) => {
         }
         delete userToRoom[socket.id];
         if (socket.username) {
-            delete onlineUsers[socket.username];
-            // ... (rest of the original disconnect logic)
+            const username = socket.username;
+            delete onlineUsers[username];
+            getUserData(username).then(userData => {
+                if (userData) {
+                    userData.friends.forEach(friend => {
+                        if (onlineUsers[friend]) io.to(onlineUsers[friend]).emit('friend-offline', username);
+                    });
+                }
+            });
+            console.log(`${username} disconnected.`);
         }
     };
 
