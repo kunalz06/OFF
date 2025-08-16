@@ -18,7 +18,10 @@ if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir);
 if (!fs.existsSync(chatImagesDir)) fs.mkdirSync(chatImagesDir);
 
 const storage = multer.memoryStorage();
-const upload = multer({ storage: storage, limits: { fileSize: 5 * 1024 * 1024 } });
+const upload = multer({ 
+    storage: storage, 
+    limits: { fileSize: 5 * 1024 * 1024 } 
+});
 app.use('/uploads', express.static(uploadsDir));
 
 // --- MongoDB Connection ---
@@ -30,7 +33,7 @@ async function connectMongo() {
     try {
         await client.connect();
         console.log("MongoDB connected successfully!");
-        const db = client.db("off_chat_app_final_stable"); // Final DB version
+        const db = client.db("off_chat_app_final_stable_v2"); // Final DB version
         usersCollection = db.collection("users");
         statusesCollection = db.collection("statuses");
         messagesCollection = db.collection("messages");
@@ -238,7 +241,34 @@ io.on('connection', (socket) => {
         callback(history);
     });
 
-    // --- WebRTC Signaling Logic ---
+    // --- WebRTC Signaling (Direct & Group) ---
+    // **Direct Call Signaling (Notification-based)**
+    socket.on('call-user', (data) => {
+        const targetSocketId = onlineUsers[data.recipient];
+        if (targetSocketId) {
+            io.to(targetSocketId).emit('call-made', { offer: data.offer, sender: socket.username });
+        }
+    });
+    socket.on('make-answer', (data) => {
+        const targetSocketId = onlineUsers[data.sender];
+        if (targetSocketId) {
+            io.to(targetSocketId).emit('answer-made', { answer: data.answer });
+        }
+    });
+    socket.on('reject-call', (data) => {
+        const targetSocketId = onlineUsers[data.caller];
+        if (targetSocketId) {
+            io.to(targetSocketId).emit('call-rejected', { reason: `${data.recipient} is busy or rejected the call.` });
+        }
+    });
+    socket.on('ice-candidate', (data) => {
+        const targetSocketId = onlineUsers[data.recipient];
+        if (targetSocketId) {
+            io.to(targetSocketId).emit('ice-candidate', { candidate: data.candidate, sender: socket.username });
+        }
+    });
+
+    // **Group Call Signaling (Room-based)**
     socket.on('join-call-room', (roomId) => {
         socket.join(roomId);
         socket.to(roomId).emit('user-joined-call', { userId: socket.username });
@@ -255,10 +285,10 @@ io.on('connection', (socket) => {
             io.to(targetSocketId).emit('webrtc-answer', { fromUserId: socket.username, answer });
         }
     });
-    socket.on('webrtc-ice-candidate', ({ targetUserId, candidate }) => {
+    socket.on('webrtc-ice-candidate-group', ({ targetUserId, candidate }) => {
         const targetSocketId = onlineUsers[targetUserId];
         if (targetSocketId) {
-            io.to(targetSocketId).emit('webrtc-ice-candidate', { fromUserId: socket.username, candidate });
+            io.to(targetSocketId).emit('webrtc-ice-candidate-group', { fromUserId: socket.username, candidate });
         }
     });
     socket.on('leave-call-room', (roomId) => {
