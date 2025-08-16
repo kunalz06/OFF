@@ -38,7 +38,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const screenShareBtn = document.getElementById('screen-share-btn');
     const endCallBtn = document.getElementById('end-call-btn');
     const callStatus = document.getElementById('call-status');
-    const incomingCallToast = document.getElementById('incoming-call-toast'); // This is no longer used but kept for structure
     const statusViewer = document.getElementById('status-viewer');
     const viewerImage = document.getElementById('viewer-image');
     const closeViewerBtn = document.getElementById('close-viewer-btn');
@@ -52,7 +51,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const callBtn = document.getElementById('call-btn');
     const groupCallBtn = document.getElementById('group-call-btn');
     
-    // Create and append the chat image upload button and input
     const chatImageInput = document.createElement('input');
     chatImageInput.type = 'file';
     chatImageInput.accept = 'image/*';
@@ -63,7 +61,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const inputArea = document.querySelector('.input-area');
     inputArea.prepend(uploadImageBtn);
     inputArea.appendChild(chatImageInput);
-
 
     const stunServers = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
@@ -395,8 +392,8 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // --- 5. WebRTC Calling Logic (Final Robust Version) ---
-    callBtn.addEventListener('click', () => startCall(activeChat.id, false));
-    groupCallBtn.addEventListener('click', () => startCall(activeChat.id, true));
+    callBtn.addEventListener('click', () => startCall(activeChat.id));
+    groupCallBtn.addEventListener('click', () => startCall(activeChat.id));
 
     function createPeerConnection(targetUserId) {
         const pc = new RTCPeerConnection(stunServers);

@@ -1,514 +1,286 @@
-document.addEventListener('DOMContentLoaded', () => {
-    const socket = io();
+const express = require('express');
+const http = require('http');
+const { Server } = require("socket.io");
+const { MongoClient, ObjectId } = require('mongodb');
+const path = require('path');
+const fs = require('fs');
+const multer = require('multer');
+const sharp = require('sharp');
 
-    // --- Global State ---
-    let currentUser = { username: '', friends: [], friendRequests: [], groups: [] };
-    let activeChat = { id: null, type: null, name: '' };
-    let localStream;
-    let isBusy = false;
-    let peerConnections = {}; // **FIX: Unified object for all peer connections {userId: pc}**
-    let currentCallRoomId = null;
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server);
 
-    // --- DOM Elements ---
-    const loginScreen = document.getElementById('login-screen');
-    const mainApp = document.getElementById('main-app');
-    const usernameInput = document.getElementById('username-input');
-    const joinBtn = document.getElementById('join-btn');
-    const contactList = document.getElementById('contact-list');
-    const tabLinks = document.querySelectorAll('.tab-link');
-    const tabContents = document.querySelectorAll('.tab-content');
-    const chatWindow = document.getElementById('chat-window');
-    const welcomeScreen = document.getElementById('welcome-screen');
-    const messagesContainer = document.getElementById('messages');
-    const messageInput = document.getElementById('message-input');
-    const sendBtn = document.getElementById('send-btn');
-    const chatHeader = document.getElementById('chat-header');
-    const profileUsername = document.getElementById('profile-username');
-    const addUsernameInput = document.getElementById('add-username-input');
-    const sendRequestBtn = document.getElementById('send-request-btn');
-    const friendRequestsList = document.getElementById('friend-requests-list');
-    const statusImageInput = document.getElementById('status-image-input');
-    const statusesFeed = document.getElementById('statuses-feed');
-    const callModal = document.getElementById('call-modal');
-    const localVideo = document.getElementById('local-video');
-    const videoGrid = document.getElementById('video-grid');
-    const toggleAudioBtn = document.getElementById('toggle-audio-btn');
-    const toggleVideoBtn = document.getElementById('toggle-video-btn');
-    const screenShareBtn = document.getElementById('screen-share-btn');
-    const endCallBtn = document.getElementById('end-call-btn');
-    const callStatus = document.getElementById('call-status');
-    const incomingCallToast = document.getElementById('incoming-call-toast');
-    const callerUsernameEl = document.getElementById('caller-username');
-    const acceptCallBtn = document.getElementById('accept-call-btn');
-    const rejectCallBtn = document.getElementById('reject-call-btn');
-    const statusViewer = document.getElementById('status-viewer');
-    const viewerImage = document.getElementById('viewer-image');
-    const closeViewerBtn = document.getElementById('close-viewer-btn');
-    const preCallAudioBtn = document.getElementById('pre-call-audio-btn');
-    const preCallVideoBtn = document.getElementById('pre-call-video-btn');
-    const newGroupBtn = document.getElementById('new-group-btn');
-    const createGroupModal = document.getElementById('create-group-modal');
-    const groupNameInput = document.getElementById('group-name-input');
-    const groupMembersList = document.getElementById('group-members-list');
-    const confirmCreateGroupBtn = document.getElementById('confirm-create-group-btn');
-    const cancelCreateGroupBtn = document.getElementById('cancel-create-group-btn');
-    const chatTitle = document.getElementById('chat-title');
-    const callBtn = document.getElementById('call-btn');
-    const groupCallBtn = document.getElementById('group-call-btn');
+// --- File Upload Setup ---
+const uploadsDir = path.join(__dirname, 'uploads');
+const chatImagesDir = path.join(uploadsDir, 'chat-images');
+if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir);
+if (!fs.existsSync(chatImagesDir)) fs.mkdirSync(chatImagesDir);
+
+const storage = multer.memoryStorage();
+const upload = multer({ storage: storage, limits: { fileSize: 5 * 1024 * 1024 } });
+app.use('/uploads', express.static(uploadsDir));
+
+// --- MongoDB Connection ---
+const mongoUrl = process.env.MONGO_URI;
+const client = new MongoClient(mongoUrl);
+let usersCollection, statusesCollection, messagesCollection, groupsCollection;
+
+async function connectMongo() {
+    try {
+        await client.connect();
+        console.log("MongoDB connected successfully!");
+        const db = client.db("off_chat_app_final_stable"); // Final DB version
+        usersCollection = db.collection("users");
+        statusesCollection = db.collection("statuses");
+        messagesCollection = db.collection("messages");
+        groupsCollection = db.collection("groups");
+        
+        await usersCollection.createIndex({ username: 1 }, { unique: true });
+        await groupsCollection.createIndex({ name: 1 }, { unique: true });
+        await statusesCollection.createIndex({ "timestamp": 1 }, { expireAfterSeconds: 43200 });
+        console.log("DB Indexes ensured.");
+    } catch (err) {
+        console.error("Error during MongoDB setup:", err);
+        process.exit(1);
+    }
+}
+connectMongo();
+
+let onlineUsers = {};
+app.use(express.static('.'));
+
+// --- API Endpoints ---
+app.post('/upload-status', upload.single('statusImage'), async (req, res) => {
+    const username = req.body.username;
+    if (!username || !req.file) {
+        return res.status(400).json({ success: false, message: 'Missing username or file.' });
+    }
+    try {
+        const fileName = `${Date.now()}-${username}.jpeg`;
+        const filePath = path.join(uploadsDir, fileName);
+        await sharp(req.file.buffer).resize(800).jpeg({ quality: 70 }).toFile(filePath);
+        const fileUrl = `/uploads/${fileName}`;
+        const statusData = { username, imageUrl: fileUrl, timestamp: new Date() };
+        const result = await statusesCollection.insertOne(statusData);
+        io.emit('new-status-posted', { ...statusData, _id: result.insertedId });
+        res.json({ success: true, fileUrl });
+    } catch (error) {
+        console.error('Upload Error:', error);
+        res.status(500).json({ success: false, message: 'Error processing image.' });
+    }
+});
+
+app.post('/upload-chat-image', upload.single('chatImage'), async (req, res) => {
+    if (!req.file) {
+        return res.status(400).json({ success: false, message: 'No file uploaded.' });
+    }
+    try {
+        const fileName = `${Date.now()}-${req.file.originalname.replace(/\s/g, '_')}.jpeg`;
+        const filePath = path.join(chatImagesDir, fileName);
+        
+        await sharp(req.file.buffer)
+            .resize(600)
+            .jpeg({ quality: 60, progressive: true, force: true })
+            .toFile(filePath);
+        
+        const fileUrl = `/uploads/chat-images/${fileName}`;
+        res.json({ success: true, url: fileUrl });
+    } catch (error) {
+        console.error('Chat Image Upload Error:', error);
+        res.status(500).json({ success: false, message: 'Error processing image.' });
+    }
+});
+
+
+// Helper function to get user data
+const getUserData = async (username) => {
+    const user = await usersCollection.findOne({ username });
+    if (!user) return null;
+    const friends = await usersCollection.find({ _id: { $in: user.friends || [] } }).project({ username: 1 }).toArray();
+    const friendRequests = await usersCollection.find({ _id: { $in: user.friendRequests || [] } }).project({ username: 1 }).toArray();
+    const groups = await groupsCollection.find({ members: username }).toArray();
+    return {
+        username: user.username,
+        friends: friends.map(f => f.username),
+        friendRequests: friendRequests.map(fr => fr.username),
+        groups: groups
+    };
+};
+
+io.on('connection', (socket) => {
+    console.log('A user connected:', socket.id);
+
+    // --- User, Friend, Status, and Group Management ---
+    socket.on('join', async (username, callback) => {
+        try {
+            let user = await usersCollection.findOne({ username });
+            if (!user) {
+                await usersCollection.insertOne({ username, friends: [], friendRequests: [], groups: [] });
+            }
+            socket.username = username;
+            onlineUsers[username] = socket.id;
+            const userData = await getUserData(username);
+            callback({ success: true, userData });
+            userData.friends.forEach(friend => {
+                if (onlineUsers[friend]) io.to(onlineUsers[friend]).emit('friend-online', username);
+            });
+        } catch (error) {
+            callback({ success: false, message: "Username might be taken or a database error occurred." });
+        }
+    });
+    socket.on('send-friend-request', async ({ recipientUsername }, callback) => {
+        const senderUsername = socket.username;
+        if (senderUsername === recipientUsername) return callback({ success: false, message: "You can't add yourself." });
+        const recipient = await usersCollection.findOne({ username: recipientUsername });
+        const sender = await usersCollection.findOne({ username: senderUsername });
+        if (!sender) return callback({ success: false, message: "Could not identify sender." });
+        if (!recipient) return callback({ success: false, message: "User not found." });
+        if (recipient.friendRequests?.some(id => id.equals(sender._id)) || recipient.friends?.some(id => id.equals(sender._id))) {
+             return callback({ success: false, message: "Request already sent or you are already friends." });
+        }
+        await usersCollection.updateOne({ _id: recipient._id }, { $addToSet: { friendRequests: sender._id } });
+        if (onlineUsers[recipientUsername]) {
+            io.to(onlineUsers[recipientUsername]).emit('new-friend-request', senderUsername);
+        }
+        callback({ success: true, message: "Friend request sent!" });
+    });
+    socket.on('accept-friend-request', async (senderUsername, callback) => {
+        const recipientUsername = socket.username;
+        const recipient = await usersCollection.findOne({ username: recipientUsername });
+        const sender = await usersCollection.findOne({ username: senderUsername });
+        if (!sender || !recipient) return callback({ success: false, message: "User not found." });
+        await usersCollection.updateOne({ _id: recipient._id }, { $addToSet: { friends: sender._id }, $pull: { friendRequests: sender._id } });
+        await usersCollection.updateOne({ _id: sender._id }, { $addToSet: { friends: recipient._id } });
+        const updatedRecipientData = await getUserData(recipientUsername);
+        callback({ success: true, userData: updatedRecipientData });
+        if (onlineUsers[senderUsername]) {
+            const updatedSenderData = await getUserData(senderUsername);
+            io.to(onlineUsers[senderUsername]).emit('request-accepted', updatedSenderData);
+        }
+    });
+    socket.on('get-statuses', async (callback) => {
+        try {
+            const statuses = await statusesCollection.find().sort({ timestamp: -1 }).toArray();
+            callback(statuses);
+        } catch (error) {
+            console.error('Error fetching statuses:', error);
+            callback([]);
+        }
+    });
+    socket.on('delete-status', async (statusId, callback) => {
+        if (!socket.username) return callback({ success: false, message: 'Authentication error.' });
+        try {
+            const status = await statusesCollection.findOne({ _id: new ObjectId(statusId) });
+            if (!status || status.username !== socket.username) return callback({ success: false, message: 'Unauthorized.' });
+            await statusesCollection.deleteOne({ _id: new ObjectId(statusId) });
+            const imagePath = path.join(__dirname, status.imageUrl);
+            fs.unlink(imagePath, (err) => {
+                if (err) console.error("Error deleting status image file:", err);
+            });
+            io.emit('status-deleted', statusId);
+            callback({ success: true });
+        } catch (error) {
+            console.error("Error deleting status:", error);
+            callback({ success: false, message: 'Server error.' });
+        }
+    });
+    socket.on('create-group', async ({ groupName, members }, callback) => {
+        try {
+            const allMembers = [...new Set([socket.username, ...members])];
+            const newGroup = { name: groupName, members: allMembers, createdBy: socket.username };
+            const result = await groupsCollection.insertOne(newGroup);
+            const createdGroup = { ...newGroup, _id: result.insertedId };
+            
+            allMembers.forEach(member => {
+                if (onlineUsers[member]) {
+                    io.to(onlineUsers[member]).emit('added-to-group', createdGroup);
+                }
+            });
+            callback({ success: true, group: createdGroup });
+        } catch (error) {
+            callback({ success: false, message: "Group name might be taken or an error occurred." });
+        }
+    });
+
+    // --- Messaging (Direct & Group) with Image Support ---
+    socket.on('private-message', async (messageData) => {
+        const fullMessage = { ...messageData, sender: socket.username, timestamp: new Date() };
+        await messagesCollection.insertOne(fullMessage);
+        const recipientSocketId = onlineUsers[messageData.recipient];
+        if (recipientSocketId) {
+            io.to(recipientSocketId).to(socket.id).emit('private-message', fullMessage);
+        } else {
+            socket.emit('private-message', fullMessage);
+        }
+    });
+    socket.on('get-chat-history', async ({ friendUsername }, callback) => {
+        const history = await messagesCollection.find({
+            $or: [{ sender: socket.username, recipient: friendUsername }, { sender: friendUsername, recipient: socket.username }]
+        }).sort({ timestamp: 1 }).toArray();
+        callback(history);
+    });
     
-    // **NEW: Hidden file input and button for image chat**
-    const chatImageInput = document.createElement('input');
-    chatImageInput.type = 'file';
-    chatImageInput.accept = 'image/*';
-    chatImageInput.style.display = 'none';
-    const uploadImageBtn = document.createElement('button');
-    uploadImageBtn.textContent = '🖼️';
-    uploadImageBtn.id = 'upload-image-btn';
-    document.querySelector('.input-area').prepend(uploadImageBtn);
-    document.querySelector('.input-area').appendChild(chatImageInput);
-
-
-    const stunServers = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
-
-    // --- 1. Initialization & Login ---
-    joinBtn.addEventListener('click', () => {
-        const username = usernameInput.value.trim();
-        if (username) {
-            socket.emit('join', username, (response) => {
-                if (response.success) {
-                    currentUser = response.userData;
-                    loginScreen.classList.add('hidden');
-                    mainApp.classList.remove('hidden');
-                    requestNotificationPermission();
-                    initializeMedia();
-                    updateUI();
-                } else {
-                    alert(response.message);
+    socket.on('group-message', async (messageData) => {
+        const fullMessage = { ...messageData, sender: socket.username, timestamp: new Date() };
+        await messagesCollection.insertOne(fullMessage);
+        const group = await groupsCollection.findOne({ _id: new ObjectId(messageData.groupId) });
+        if (group) {
+            group.members.forEach(member => {
+                if (onlineUsers[member]) {
+                    io.to(onlineUsers[member]).emit('group-message', fullMessage);
                 }
             });
         }
     });
-
-    async function initializeMedia() {
-        try {
-            localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-            localVideo.srcObject = localStream;
-        } catch (error) { 
-            console.error("Error accessing media devices.", error);
-            alert("Camera/mic permissions are needed for calling features.");
-            localStream = new MediaStream();
-        }
-    }
-
-    // --- 2. Notification Logic ---
-    function requestNotificationPermission() {
-        if ('Notification' in window && Notification.permission !== 'granted' && Notification.permission !== 'denied') {
-            Notification.requestPermission();
-        }
-    }
-
-    function showNotification(title, body) {
-        if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {
-            new Notification(title, { body });
-        }
-    }
-
-    // --- 3. UI, Status, Friend, and Chat Logic ---
-    function updateUI() {
-        profileUsername.textContent = `Welcome, ${currentUser.username}`;
-        friendRequestsList.innerHTML = '';
-        if (currentUser.friendRequests && currentUser.friendRequests.length > 0) {
-            currentUser.friendRequests.forEach(username => {
-                const item = document.createElement('div');
-                item.className = 'request-item';
-                item.innerHTML = `<span>${username}</span><button data-username="${username}">Accept</button>`;
-                friendRequestsList.appendChild(item);
-            });
-        } else {
-            friendRequestsList.innerHTML = '<p>No new requests.</p>';
-        }
-
-        contactList.innerHTML = '';
-        if (currentUser.groups && currentUser.groups.length > 0) {
-            const groupHeader = document.createElement('div');
-            groupHeader.className = 'contact-list-section-header';
-            groupHeader.textContent = 'Groups';
-            contactList.appendChild(groupHeader);
-            currentUser.groups.forEach(group => {
-                const item = document.createElement('div');
-                item.className = 'contact-item';
-                item.onclick = () => openChat(group._id, 'group', group.name);
-                item.innerHTML = `<span>${group.name}</span>`;
-                contactList.appendChild(item);
-            });
-        }
-
-        const friendHeader = document.createElement('div');
-        friendHeader.className = 'contact-list-section-header';
-        friendHeader.textContent = 'Friends';
-        contactList.appendChild(friendHeader);
-        if (currentUser.friends) {
-            currentUser.friends.forEach(username => {
-                const item = document.createElement('div');
-                item.className = 'contact-item';
-                item.onclick = () => openChat(username, 'dm', username);
-                item.innerHTML = `<span>${username}</span><div class="status-indicator"></div>`;
-                contactList.appendChild(item);
-            });
-        }
-    }
-
-    tabLinks.forEach(link => {
-        link.addEventListener('click', () => {
-            activeTab = link.dataset.tab;
-            tabLinks.forEach(l => l.classList.remove('active'));
-            link.classList.add('active');
-            tabContents.forEach(c => c.classList.add('hidden'));
-            document.getElementById(`${activeTab}-tab`).classList.remove('hidden');
-            const showContacts = (activeTab === 'chats' || activeTab === 'calls');
-            contactList.style.display = showContacts ? 'block' : 'none';
-            if (showContacts) updateUI();
-            if (activeTab === 'status') fetchStatuses();
-        });
+    socket.on('get-group-chat-history', async ({ groupId }, callback) => {
+        const history = await messagesCollection.find({ groupId }).sort({ timestamp: 1 }).toArray();
+        callback(history);
     });
 
-    statusImageInput.addEventListener('change', (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-        const formData = new FormData();
-        formData.append('username', currentUser.username);
-        formData.append('statusImage', file);
-        fetch('/upload-status', { method: 'POST', body: formData })
-            .then(res => res.json())
-            .then(data => {
-                if (!data.success) alert('Upload failed!');
-                statusImageInput.value = '';
-            })
-            .catch(err => console.error('Upload error:', err));
+    // --- WebRTC Signaling Logic ---
+    socket.on('join-call-room', (roomId) => {
+        socket.join(roomId);
+        socket.to(roomId).emit('user-joined-call', { userId: socket.username });
     });
-    function fetchStatuses() {
-        socket.emit('get-statuses', (statuses) => {
-            statusesFeed.innerHTML = '';
-            statuses.forEach(status => renderStatus(status));
-        });
-    }
-    function renderStatus(status) {
-        const card = document.createElement('div');
-        card.className = 'status-card';
-        card.dataset.statusId = status._id;
-        card.dataset.imageUrl = status.imageUrl;
-        let deleteButtonHTML = '';
-        if (currentUser.username === status.username) {
-            deleteButtonHTML = `<button class="delete-status-btn" data-status-id="${status._id}">&times;</button>`;
+    socket.on('webrtc-offer', ({ targetUserId, offer }) => {
+        const targetSocketId = onlineUsers[targetUserId];
+        if (targetSocketId) {
+            io.to(targetSocketId).emit('webrtc-offer', { fromUserId: socket.username, offer });
         }
-        card.innerHTML = `<img src="${status.imageUrl}" alt="Status by ${status.username}"><p><strong>${status.username}</strong></p>${deleteButtonHTML}`;
-        statusesFeed.prepend(card);
-    }
-    statusesFeed.addEventListener('click', (e) => {
-        const target = e.target;
-        if (target.classList.contains('delete-status-btn')) {
-            e.stopPropagation();
-            const statusId = target.dataset.statusId;
-            if (confirm('Are you sure you want to delete this status?')) {
-                socket.emit('delete-status', statusId, (response) => {
-                    if (!response.success) alert(`Error: ${response.message}`);
+    });
+    socket.on('webrtc-answer', ({ targetUserId, answer }) => {
+        const targetSocketId = onlineUsers[targetUserId];
+        if (targetSocketId) {
+            io.to(targetSocketId).emit('webrtc-answer', { fromUserId: socket.username, answer });
+        }
+    });
+    socket.on('webrtc-ice-candidate', ({ targetUserId, candidate }) => {
+        const targetSocketId = onlineUsers[targetUserId];
+        if (targetSocketId) {
+            io.to(targetSocketId).emit('webrtc-ice-candidate', { fromUserId: socket.username, candidate });
+        }
+    });
+    socket.on('leave-call-room', (roomId) => {
+        socket.leave(roomId);
+        socket.to(roomId).emit('user-left-call', { userId: socket.username });
+    });
+
+    // --- Disconnect Logic ---
+    socket.on('disconnect', async () => {
+        if (socket.username) {
+            const username = socket.username;
+            delete onlineUsers[username];
+            const userData = await getUserData(username);
+            if (userData) {
+                userData.friends.forEach(friend => {
+                    if (onlineUsers[friend]) io.to(onlineUsers[friend]).emit('friend-offline', username);
                 });
             }
-        } else {
-            const card = target.closest('.status-card');
-            if (card) {
-                viewerImage.src = card.dataset.imageUrl;
-                statusViewer.classList.remove('hidden');
-            }
+            console.log(`${username} disconnected.`);
         }
     });
-    closeViewerBtn.addEventListener('click', () => {
-        statusViewer.classList.add('hidden');
-        viewerImage.src = '';
-    });
-    sendRequestBtn.addEventListener('click', () => {
-        const recipientUsername = addUsernameInput.value.trim();
-        if (recipientUsername) {
-            socket.emit('send-friend-request', { recipientUsername }, (response) => {
-                alert(response.message);
-                if (response.success) addUsernameInput.value = '';
-            });
-        }
-    });
-    friendRequestsList.addEventListener('click', (e) => {
-        if (e.target.tagName === 'BUTTON') {
-            const senderUsername = e.target.dataset.username;
-            socket.emit('accept-friend-request', senderUsername, (response) => {
-                if (response.success) currentUser = response.userData;
-                updateUI();
-            });
-        }
-    });
-
-    function openChat(id, type, name) {
-        activeChat = { id, type, name };
-        chatWindow.classList.remove('hidden');
-        welcomeScreen.classList.add('hidden');
-        chatTitle.textContent = name;
-        messagesContainer.innerHTML = '';
-
-        if (type === 'dm') {
-            groupCallBtn.classList.add('hidden');
-            callBtn.classList.remove('hidden');
-            socket.emit('get-chat-history', { friendUsername: id }, (history) => {
-                history.forEach(msg => renderMessage(msg));
-            });
-        } else if (type === 'group') {
-            callBtn.classList.add('hidden');
-            groupCallBtn.classList.remove('hidden');
-            socket.emit('get-group-chat-history', { groupId: id }, (history) => {
-                history.forEach(msg => renderMessage(msg));
-            });
-        }
-    }
-    function renderMessage(msg) {
-        const bubble = document.createElement('div');
-        bubble.className = `message-bubble ${msg.sender === currentUser.username ? 'sent' : 'received'}`;
-        
-        if (msg.type === 'image') {
-            bubble.innerHTML = `<img src="${msg.content}" alt="Sent image" class="chat-image">`;
-        } else {
-            bubble.innerText = msg.content;
-        }
-        
-        messagesContainer.appendChild(bubble);
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
-    }
-    function sendMessage() {
-        const text = messageInput.value.trim();
-        if (text && activeChat.id) {
-            const messageData = { type: 'text', content: text };
-            if (activeChat.type === 'dm') {
-                socket.emit('private-message', { ...messageData, recipient: activeChat.id });
-            } else if (activeChat.type === 'group') {
-                socket.emit('group-message', { ...messageData, groupId: activeChat.id });
-            }
-            messageInput.value = '';
-        }
-    }
-    sendBtn.addEventListener('click', sendMessage);
-    messageInput.addEventListener('keypress', (e) => (e.key === 'Enter') && sendMessage());
-
-    uploadImageBtn.addEventListener('click', () => chatImageInput.click());
-    chatImageInput.addEventListener('change', (e) => {
-        const file = e.target.files[0];
-        if (!file || !activeChat.id) return;
-
-        const formData = new FormData();
-        formData.append('chatImage', file);
-
-        fetch('/upload-chat-image', { method: 'POST', body: formData })
-            .then(res => res.json())
-            .then(data => {
-                if (data.success) {
-                    const messageData = { type: 'image', content: data.url };
-                    if (activeChat.type === 'dm') {
-                        socket.emit('private-message', { ...messageData, recipient: activeChat.id });
-                    } else if (activeChat.type === 'group') {
-                        socket.emit('group-message', { ...messageData, groupId: activeChat.id });
-                    }
-                } else {
-                    alert('Image upload failed!');
-                }
-            })
-            .catch(err => console.error('Upload error:', err))
-            .finally(() => {
-                chatImageInput.value = ''; // Reset input
-            });
-    });
-
-    newGroupBtn.addEventListener('click', () => {
-        groupMembersList.innerHTML = '';
-        currentUser.friends.forEach(friend => {
-            const item = document.createElement('div');
-            item.className = 'member-selection-item';
-            item.innerHTML = `<input type="checkbox" id="member-${friend}" value="${friend}"> <label for="member-${friend}">${friend}</label>`;
-            groupMembersList.appendChild(item);
-        });
-        createGroupModal.classList.remove('hidden');
-    });
-    cancelCreateGroupBtn.addEventListener('click', () => createGroupModal.classList.add('hidden'));
-    confirmCreateGroupBtn.addEventListener('click', () => {
-        const groupName = groupNameInput.value.trim();
-        const selectedMembers = Array.from(groupMembersList.querySelectorAll('input:checked')).map(input => input.value);
-        if (groupName && selectedMembers.length > 0) {
-            socket.emit('create-group', { groupName, members: selectedMembers }, (response) => {
-                if (response.success) {
-                    currentUser.groups.push(response.group);
-                    updateUI();
-                    createGroupModal.classList.add('hidden');
-                } else {
-                    alert(response.message);
-                }
-            });
-        }
-    });
-
-    // --- 4. Real-time Socket Event Handlers ---
-    socket.on('private-message', (msg) => {
-        if (activeChat.type === 'dm' && (msg.sender === activeChat.id || msg.sender === currentUser.username)) {
-            renderMessage(msg);
-        }
-        if (msg.sender !== currentUser.username && (activeChat.type !== 'dm' || activeChat.id !== msg.sender)) {
-            showNotification(`New Message from ${msg.sender}`, msg.type === 'image' ? 'Sent an image' : msg.content);
-        }
-    });
-    socket.on('group-message', (msg) => {
-        if (activeChat.type === 'group' && activeChat.id === msg.groupId) {
-            renderMessage(msg);
-        } else {
-            const group = currentUser.groups.find(g => g._id === msg.groupId);
-            if (group && msg.sender !== currentUser.username) {
-                showNotification(`New message in ${group.name}`, `${msg.sender}: ${msg.type === 'image' ? 'Sent an image' : msg.content}`);
-            }
-        }
-    });
-    socket.on('added-to-group', (group) => {
-        currentUser.groups.push(group);
-        updateUI();
-        showNotification(`Added to new group: ${group.name}`, `By ${group.createdBy}`);
-    });
-    socket.on('new-friend-request', (senderUsername) => {
-        if (!currentUser.friendRequests.includes(senderUsername)) currentUser.friendRequests.push(senderUsername);
-        updateUI();
-        showNotification('New Friend Request', `From ${senderUsername}`);
-    });
-    socket.on('request-accepted', (updatedUserData) => {
-        currentUser = updatedUserData;
-        updateUI();
-        showNotification('Friend Request Accepted', `You are now friends.`);
-    });
-    socket.on('friend-online', (username) => {
-        const indicator = document.querySelector(`.contact-item[data-username="${username}"] .status-indicator`);
-        if (indicator) indicator.classList.add('online');
-    });
-    socket.on('friend-offline', (username) => {
-        const indicator = document.querySelector(`.contact-item[data-username="${username}"] .status-indicator`);
-        if (indicator) indicator.classList.remove('online');
-    });
-    socket.on('new-status-posted', (status) => {
-        if (activeTab === 'status') renderStatus(status);
-    });
-    socket.on('status-deleted', (statusId) => {
-        const cardToRemove = document.querySelector(`.status-card[data-status-id="${statusId}"]`);
-        if (cardToRemove) cardToRemove.remove();
-    });
-
-    // --- 5. WebRTC Calling Logic (Final Robust Version) ---
-    callBtn.addEventListener('click', () => startCall(activeChat.id, false));
-    groupCallBtn.addEventListener('click', () => startCall(activeChat.id, true));
-
-    function createPeerConnection(targetUserId) {
-        const pc = new RTCPeerConnection(stunServers);
-        
-        pc.onicecandidate = (event) => {
-            if (event.candidate) {
-                socket.emit('webrtc-ice-candidate', { targetUserId, candidate: event.candidate });
-            }
-        };
-
-        pc.ontrack = (event) => {
-            let videoEl = document.getElementById(`video-${targetUserId}`);
-            if (!videoEl) {
-                videoEl = document.createElement('video');
-                videoEl.id = `video-${targetUserId}`;
-                videoEl.autoplay = true;
-                videoEl.playsInline = true;
-                videoGrid.appendChild(videoEl);
-            }
-            if (videoEl.srcObject !== event.streams[0]) {
-                videoEl.srcObject = event.streams[0];
-            }
-        };
-
-        if (localStream) {
-            localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-        }
-        
-        peerConnections[targetUserId] = pc;
-    }
-
-    async function startCall(roomId, isGroup) {
-        if (!localStream || localStream.getTracks().length === 0) return alert("Cannot start call. Check media permissions.");
-        isBusy = true;
-        currentCallRoomId = roomId;
-        callModal.classList.remove('hidden');
-        callStatus.textContent = `Call: ${activeChat.name}`;
-        socket.emit('join-call-room', roomId);
-    }
-
-    socket.on('user-joined-call', async ({ userId }) => {
-        createPeerConnection(userId);
-        const pc = peerConnections[userId];
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-        socket.emit('webrtc-offer', { targetUserId: userId, offer });
-    });
-
-    socket.on('webrtc-offer', async ({ fromUserId, offer }) => {
-        createPeerConnection(fromUserId);
-        const pc = peerConnections[fromUserId];
-        await pc.setRemoteDescription(new RTCSessionDescription(offer));
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        socket.emit('webrtc-answer', { targetUserId: fromUserId, answer });
-    });
-
-    socket.on('webrtc-answer', async ({ fromUserId, answer }) => {
-        const pc = peerConnections[fromUserId];
-        if (pc) {
-            await pc.setRemoteDescription(new RTCSessionDescription(answer));
-        }
-    });
-
-    socket.on('webrtc-ice-candidate', ({ fromUserId, candidate }) => {
-        const pc = peerConnections[fromUserId];
-        if (pc) {
-            pc.addIceCandidate(new RTCIceCandidate(candidate));
-        }
-    });
-    
-    socket.on('user-left-call', ({ userId }) => {
-        if (peerConnections[userId]) {
-            peerConnections[userId].close();
-            delete peerConnections[userId];
-        }
-        const videoEl = document.getElementById(`video-${userId}`);
-        if (videoEl) {
-            videoEl.remove();
-        }
-    });
-
-    function endCall() {
-        isBusy = false;
-        socket.emit('leave-call-room', currentCallRoomId);
-        for (const userId in peerConnections) {
-            peerConnections[userId].close();
-            const videoEl = document.getElementById(`video-${userId}`);
-            if (videoEl) videoEl.remove();
-        }
-        peerConnections = {};
-        currentCallRoomId = null;
-        callModal.classList.add('hidden');
-    }
-    endCallBtn.addEventListener('click', endCall);
-
-    toggleAudioBtn.addEventListener('click', () => {
-        const enabled = !localStream.getAudioTracks()[0].enabled;
-        localStream.getAudioTracks()[0].enabled = enabled;
-        toggleAudioBtn.classList.toggle('muted', !enabled);
-        toggleAudioBtn.textContent = enabled ? '🎤' : '🔇';
-    });
-    toggleVideoBtn.addEventListener('click', () => {
-        const enabled = !localStream.getVideoTracks()[0].enabled;
-        localStream.getVideoTracks()[0].enabled = enabled;
-        toggleVideoBtn.classList.toggle('off', !enabled);
-        toggleVideoBtn.textContent = enabled ? '📹' : '📸';
-    });
-    screenShareBtn.addEventListener('click', async () => { /* ... Unchanged ... */ });
 });
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
